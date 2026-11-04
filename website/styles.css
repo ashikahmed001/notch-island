@@ -1,0 +1,104 @@
+/* Notch Island site — aluminium & graphite, one orange accent (the mic dot). */
+:root {
+  --bg: #e9e9ec;
+  --surface: #f6f6f7;
+  --ink: #121214;
+  --muted: #5b5d65;
+  --line: #d3d4d9;
+  --accent: #e85d0c;
+  --accent-ink: #ffffff;
+  --island: #000000;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Helvetica Neue", sans-serif;
+  --font-body: "Geist", -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+  /* Layout: one 1120px column, the island hangs from the top edge of the page. */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111214;
+    --surface: #1a1b1e;
+    --ink: #f1f1f3;
+    --muted: #9b9da5;
+    --line: #2a2c30;
+    --accent: #ff7d33;
+    --accent-ink: #160a02;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111214;
+  --surface: #1a1b1e;
+  --ink: #f1f1f3;
+  --muted: #9b9da5;
+  --line: #2a2c30;
+  --accent: #ff7d33;
+  --accent-ink: #160a02;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 17px/1.6 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+img, svg { max-width: 100%; }
+a { color: inherit; }
+a:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; letter-spacing: -0.02em; }
+p { margin: 0; }
+code, pre, kbd { font-family: var(--font-mono); }
+
+.wrap { width: min(1120px, 100% - 40px); margin-inline: auto; }
+
+/* Top bar */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 0; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 650 17px/1 var(--font-display); }
+.brand svg { width: 30px; height: 30px; }
+.topbar nav { display: flex; gap: 22px; font-size: 15px; }
+.topbar nav a { text-decoration: none; color: var(--muted); }
+.topbar nav a:hover { color: var(--ink); }
+
+.button {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 20px; border-radius: 999px; border: 1px solid transparent;
+  font: 600 15px/1 var(--font-body); text-decoration: none; cursor: pointer;
+  transition: transform .15s ease, background .15s ease;
+}
+.button:active { transform: scale(.97); }
+.button.primary { background: var(--accent); color: var(--accent-ink); }
+.button.primary:hover { filter: brightness(1.05); }
+.button.ghost { border-color: var(--line); color: var(--ink); background: transparent; }
+.button.ghost:hover { background: var(--surface); }
+
+.footer { border-top: 1px solid var(--line); margin-top: 96px; padding: 28px 0 48px; color: var(--muted); font-size: 14px; }
+.footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; }
+.footer nav { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.footer a { text-decoration: none; }
+.footer a:hover { color: var(--ink); }
+
+/* Legal / text pages */
+.doc { width: min(720px, 100% - 40px); margin: 40px auto 0; }
+.doc h1 { font-size: clamp(34px, 5vw, 48px); line-height: 1.05; margin-bottom: 8px; }
+.doc .updated { color: var(--muted); font-size: 14px; margin-bottom: 36px; }
+.doc h2 { font-size: 22px; margin: 36px 0 10px; }
+.doc p, .doc li { color: var(--ink); }
+.doc p + p { margin-top: 12px; }
+.doc ul { padding-left: 20px; margin: 10px 0; display: grid; gap: 6px; }
+.doc .note { border-left: 3px solid var(--accent); padding: 10px 14px; background: var(--surface); border-radius: 0 8px 8px 0; color: var(--muted); font-size: 15px; margin-bottom: 28px; }
+.release { border-top: 1px solid var(--line); padding: 26px 0; display: grid; grid-template-columns: 140px 1fr; gap: 18px; }
+.release h2 { margin: 0; font-size: 20px; }
+.release time { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .release { grid-template-columns: 1fr; gap: 6px; } .topbar nav { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

@@ -25,18 +25,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let clipboard = ClipboardService()
     private let timer = TimerService()
     private let calendar = CalendarService()
+    private let reminders = ReminderService()
+    private let audioOutputs = AudioOutputService()
+    private lazy var stats = SystemStatsService(battery: battery)
+    private let todos = TodoService()
+    private lazy var claudeWatcher = ClaudeAppWatcher(api: api)
     private let lock = LockService()
     private let screenshots = ScreenshotService()
     private let downloads = DownloadsService()
+    private let api = IslandAPIService()
+    private let terminalSettings = TerminalSettings()
     /// Services stay off until the launch greeting has started them.
     private var servicesStarted = false
+    /// Command Bar shortcut (nil while the feature is off).
+    private var commandHotKey: HotKey?
+    private var commandHotKeyPreset: HotKey.Preset?
     private var settingsWindow: NSWindow?
+    private let settingsNavigation = SettingsNavigation()
     private var permissionsWindow: NSWindow?
-    private lazy var permissionsModel = PermissionsModel(calendarService: calendar)
+    private lazy var permissionsModel = PermissionsModel(calendarService: calendar, reminderService: reminders)
     private static let launchedBeforeKey = "hasLaunchedBefore"
     private static let greetedBootKey = "greetedBootTime"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        LiquidGlass.flags = flags
+        Energy.flags = flags
+        _ = UpdateController.shared   // starts daily update checks (release builds)
+        // Refresh ~/.notchisland (token, `notch` command, shell hook) so they match this version.
+        APIFiles.writeSupportFiles(settings: terminalSettings.values)
+        APIFiles.upgradeAgentHooks()
+
         // objectWillChange fires *before* the change; hop a run-loop turn to read new values.
         flags.objectWillChange
             .receive(on: RunLoop.main)
@@ -48,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &cancellables)
 
         setupStatusItem()
+        NotificationCenter.default.addObserver(forName: .commandBarShortcutChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.updateCommandHotKey()
+        }
         rebuildWindows()
         greetThenStart()
         NotificationCenter.default.addObserver(
@@ -67,17 +88,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard servicesStarted else { return }
         nowPlaying.isEnabled = flags.isOn(.nowPlaying)
         nowPlaying.allowsOnlineLookup = flags.isOn(.artworkLookup)
+        nowPlaying.includesBrowsers = flags.isOn(.browserMedia)
         clipboard.isEnabled = flags.isOn(.clipboard)
         calendar.isEnabled = flags.isOn(.calendar)
+        calendar.announcesNewMeetings = flags.isOn(.newMeetingAlerts)
+        reminders.isEnabled = flags.isOn(.reminders)
         timer.playsSound = flags.isOn(.timerSound)
         screenshots.isEnabled = flags.isOn(.screenshotShelf)
         downloads.isEnabled = flags.isOn(.downloads)
+        PrivacyService.shared.isEnabled = flags.isOn(.privacy) && !lock.isLocked
+        SystemProgressService.shared.watchesBackups = flags.isOn(.backupProgress) && !lock.isLocked
+        SystemProgressService.shared.watchesCopies = flags.isOn(.copyProgress)
+        DiskService.shared.isEnabled = flags.isOn(.ejectAlerts)
+        updateCommandHotKey()
+        api.isEnabled = flags.isOn(.islandAPI)
+        api.terminalAlertsEnabled = flags.isOn(.terminalAlerts)
+        api.onlyWhenTerminalInBackground = flags.isOn(.terminalOnlyInBackground)
+        claudeWatcher.isEnabled = flags.isOn(.claudeAppActivity) && !lock.isLocked
         if !flags.isOn(.timer) { timer.stop() }
 
         // Nobody can see the island while locked. Timer, calendar and battery keep running.
         let paused = lock.isLocked && flags.isOn(.pauseWhileLocked)
         nowPlaying.isPaused = paused
         clipboard.isPaused = paused
+    }
+
+    // MARK: - Command Bar
+
+    /// (Re)registers the shortcut when the feature or the chosen keys change.
+    private func updateCommandHotKey() {
+        let wanted = flags.isOn(.commandBar) ? HotKey.Preset.saved : nil
+        guard wanted != commandHotKeyPreset else { return }
+        commandHotKey = nil
+        commandHotKeyPreset = wanted
+        guard let preset = wanted else { return }
+        commandHotKey = HotKey(modifiers: preset.modifiers) { [weak self] in self?.toggleCommandBar() }
+    }
+
+    @objc private func toggleCommandBar() {
+        // On the screen with the pointer (or the first one).
+        let mouse = NSEvent.mouseLocation
+        let controller = controllers.first { $0.screenFrame.contains(mouse) } ?? controllers.first
+        controller?.toggleCommandBar()
     }
 
     // MARK: - Launch
@@ -129,13 +181,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if settingsWindow == nil {
             let view = SettingsView(
                 flags: flags,
+                navigation: settingsNavigation,
+                api: api,
+                terminal: terminalSettings,
                 canOpenAtLogin: canOpenAtLogin,
                 showWelcome: { [weak self] in self?.showWelcomeNow() },
                 showPermissions: { [weak self] in self?.openPermissions() }
             )
-            settingsWindow = AppWindows.make(title: "Notch Island Settings", size: NSSize(width: 520, height: 500), content: view)
+            settingsWindow = AppWindows.make(title: String(localized: "Notch Island Settings"), size: NSSize(width: 800, height: 600), content: view)
         }
         if let settingsWindow { AppWindows.present(settingsWindow) }
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateController.shared.checkForUpdates()
     }
 
     @objc private func openPermissions() {
@@ -172,8 +231,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Windows
 
+    /// Which screen the island is on, its size and notch. macOS posts "screen parameters
+    /// changed" for many things that don't matter here (e.g. plugging in the charger switches
+    /// the display's power profile) — rebuilding then would throw away whatever the island is showing.
+    private var screenSignature: String?
+
     @objc private func screensChanged() {
+        guard Self.signature(of: NotchGeometry.preferredScreen()) != screenSignature else {
+            Log.island.notice("screen parameters changed — same screen, island kept")
+            return
+        }
+        Log.island.notice("screen changed — rebuilding the island")
         rebuildWindows()
+    }
+
+    private static func signature(of screen: NSScreen?) -> String {
+        guard let screen else { return "none" }
+        let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")].map { "\($0)" } ?? "?"
+        return "\(id)|\(screen.frame)|\(screen.safeAreaInsets.top)"
     }
 
     /// One island on the notched built-in display; falls back to the main screen
@@ -182,6 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controllers.forEach { $0.close() }
         controllers.removeAll()
         guard let screen = NotchGeometry.preferredScreen() else { return }
+        screenSignature = Self.signature(of: screen)
         let controller = NotchWindowController(
             screen: screen,
             nowPlaying: nowPlaying,
@@ -189,9 +265,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             clipboard: clipboard,
             timer: timer,
             calendar: calendar,
+            reminders: reminders,
+            audioOutputs: audioOutputs,
+            stats: stats,
+            todos: todos,
             lock: lock,
             screenshots: screenshots,
             downloads: downloads,
+            api: api,
             flags: flags
         )
         controllers.append(controller)
@@ -213,16 +294,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        let settings = NSMenuItem(title: String(localized: "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
 
-        let permissions = NSMenuItem(title: "Permissions…", action: #selector(openPermissions), keyEquivalent: "")
+        if flags.isOn(.commandBar) {
+            let command = NSMenuItem(title: String(localized: "Command Bar"), action: #selector(toggleCommandBar), keyEquivalent: "")
+            command.target = self
+            menu.addItem(command)
+        }
+
+        let permissions = NSMenuItem(title: String(localized: "Permissions…"), action: #selector(openPermissions), keyEquivalent: "")
         permissions.target = self
         menu.addItem(permissions)
 
+        if UpdateController.shared.isConfigured {
+            let update = NSMenuItem(title: String(localized: "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
+            update.target = self
+            update.isEnabled = UpdateController.shared.canCheck
+            menu.addItem(update)
+        }
+
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Notch Island", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: String(localized: "Quit Notch Island"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     }
 }
 

@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import IOKit.ps
 
@@ -13,6 +14,9 @@ final class BatteryService: ObservableObject {
     @Published private(set) var minutesToEmpty: Int?
     @Published private(set) var minutesToFull: Int?
 
+    /// The charger was just connected (not fired for the state at launch).
+    let chargerConnected = PassthroughSubject<Void, Never>()
+
     private var runLoopSource: CFRunLoopSource?
     private var lowPowerObserver: NSObjectProtocol?
 
@@ -24,7 +28,8 @@ final class BatteryService: ObservableObject {
             Unmanaged<BatteryService>.fromOpaque(context).takeUnretainedValue().update()
         }
         if let source = IOPSNotificationCreateRunLoopSource(callback, context)?.takeRetainedValue() {
-            CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+            // Common modes: keep hearing about the charger while menus are open or the UI is busy.
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
             runLoopSource = source
         }
         lowPowerObserver = NotificationCenter.default.addObserver(
@@ -38,7 +43,7 @@ final class BatteryService: ObservableObject {
 
     deinit {
         if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .defaultMode)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
         if let lowPowerObserver {
             NotificationCenter.default.removeObserver(lowPowerObserver)
@@ -83,6 +88,14 @@ final class BatteryService: ObservableObject {
             let toEmpty = (desc[kIOPSTimeToEmptyKey] as? Int).flatMap { $0 > 0 ? $0 : nil }
             let toFull = (desc[kIOPSTimeToFullChargeKey] as? Int).flatMap { $0 > 0 ? $0 : nil }
 
+            let wasKnown = hasBattery
+            if wasKnown && newPlugged != isPluggedIn {
+                Log.battery.notice("power changed — plugged in: \(newPlugged, privacy: .public), charging: \(newCharging, privacy: .public), level: \(newLevel, privacy: .public)%")
+            }
+            if wasKnown && newPlugged && !isPluggedIn {
+                // Publish after the new values are in place, so the alert shows the right level.
+                DispatchQueue.main.async { [weak self] in self?.chargerConnected.send() }
+            }
             if !hasBattery { hasBattery = true }
             if newLevel != level { level = newLevel }
             if newCharging != isCharging { isCharging = newCharging }

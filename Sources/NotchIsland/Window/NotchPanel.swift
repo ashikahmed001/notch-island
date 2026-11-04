@@ -3,6 +3,10 @@ import SwiftUI
 
 /// Borderless, transparent, non-activating panel that floats over the menu bar.
 final class NotchPanel: NSPanel {
+    /// Only while typing (Home ▸ Add a task): otherwise clicks never steal focus from your app.
+    var allowsKey = false
+    override var canBecomeKey: Bool { allowsKey }
+
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
@@ -23,7 +27,6 @@ final class NotchPanel: NSPanel {
         ignoresMouseEvents = true   // click-through while collapsed
     }
 
-    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     /// AppKit normally pushes windows below the menu bar — we need to sit on top of it.

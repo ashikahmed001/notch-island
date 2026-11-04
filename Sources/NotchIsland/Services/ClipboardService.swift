@@ -50,7 +50,8 @@ final class ClipboardService: ObservableObject {
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.poll()
         }
-        timer.tolerance = 0.2
+        // Generous tolerance lets macOS bundle this with its other wake-ups (saves battery).
+        timer.tolerance = 0.3
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }
@@ -195,7 +196,12 @@ final class ClipboardService: ObservableObject {
         up?.post(tap: .cghidEventTap)
     }
 
+    private var pollTick = 0
+
     private func poll() {
+        // Low Power Mode: check once a second instead of twice.
+        pollTick &+= 1
+        if Energy.saver && ProcessInfo.processInfo.isLowPowerModeEnabled && pollTick % 2 == 1 { return }
         guard isEnabled, !isPaused else { return }
         let count = pasteboard.changeCount
         guard count != lastChangeCount else { return }

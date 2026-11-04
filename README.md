@@ -14,9 +14,12 @@ A Dynamic Island for the MacBook notch, built with SwiftUI and AppKit.
 - **Screenshot shelf:** new screenshots drop from the notch with a thumbnail and join the clipboard shelf, ready to drag.
 - **Downloads:** progress ring while a browser downloads, then "Downloaded" and the file on the shelf (right-click › Show in Finder).
 - **Settings window** (⌘,) and a **permissions screen** on first launch.
+- **Terminal & Island API:** `notch` command, alerts when long terminal commands finish, Claude Code / Copilot CLI "done" alerts, Shortcuts. See [docs/ISLAND_API.md](docs/ISLAND_API.md).
 - **Lock & Unlock:** padlock animation on unlock, "while you were away" summary, background checks paused while locked.
 - **Feature flags:** every feature and option can be switched on/off from the menu bar icon; off means fully stopped.
 - Menu bar icon with Quit; no Dock icon.
+
+New to Swift? Start with **[CODE_GUIDE.md](CODE_GUIDE.md)**, a tour of the code for Java, C# and React developers.
 
 ## Requirements
 - macOS 13 Ventura or later
@@ -57,6 +60,7 @@ Sources/NotchIsland/
 │   └── LockService.swift           Screen lock / unlock events
 ├── Settings/
 │   └── FeatureFlags.swift          Every feature + option as a persisted on/off switch
+├── Services/IslandAPI/           Local HTTP API, `notch` CLI + shell hook scripts, agent connections
 ├── Windows/
 │   ├── SettingsView.swift          Settings window (Features / General / About)
 │   ├── PermissionsView.swift       First-run permissions screen with live status

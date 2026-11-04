@@ -19,18 +19,21 @@ final class PermissionsModel: ObservableObject {
 
     @Published private(set) var accessibility: Status = .unknown
     @Published private(set) var calendar: Status = .unknown
+    @Published private(set) var reminders: Status = .unknown
     @Published private(set) var automation: [MediaSource: Status] = [:]
     @Published private(set) var desktop: Status = .unknown
     @Published private(set) var downloads: Status = .unknown
 
     let installedPlayers = MediaSource.allCases.filter(\.isInstalled)
     private let calendarService: CalendarService
+    private let reminderService: ReminderService
     private var timer: Timer?
     private let queue = DispatchQueue(label: "NotchIsland.Permissions", qos: .userInitiated)
     private static let folderKeyPrefix = "permissions.folder."
 
-    init(calendarService: CalendarService) {
+    init(calendarService: CalendarService, reminderService: ReminderService) {
         self.calendarService = calendarService
+        self.reminderService = reminderService
         refresh()
     }
 
@@ -50,8 +53,10 @@ final class PermissionsModel: ObservableObject {
         let ax: Status = AXIsProcessTrusted() ? .granted : .notAsked
         if ax != accessibility { accessibility = ax }
 
-        let cal = Self.calendarStatus()
+        let cal = Self.eventKitStatus(.event)
         if cal != calendar { calendar = cal }
+        let rem = Self.eventKitStatus(.reminder)
+        if rem != reminders { reminders = rem }
 
         desktop = folderStatus(ScreenshotService.screenshotFolder)
         downloads = folderStatus(DownloadsService.downloadsFolder)
@@ -80,6 +85,10 @@ final class PermissionsModel: ObservableObject {
 
     func requestCalendar() {
         calendarService.requestAccess()
+    }
+
+    func requestReminders() {
+        reminderService.requestAccess()
     }
 
     /// macOS only asks while the player is running, so launch it quietly first.
@@ -114,8 +123,8 @@ final class PermissionsModel: ObservableObject {
 
     // MARK: - Status checks
 
-    private static func calendarStatus() -> Status {
-        let status = EKEventStore.authorizationStatus(for: .event)
+    private static func eventKitStatus(_ type: EKEntityType) -> Status {
+        let status = EKEventStore.authorizationStatus(for: type)
         switch status {
         case .notDetermined: return .notAsked
         case .denied, .restricted: return .denied
@@ -187,6 +196,13 @@ struct PermissionsView: View {
                     detail: "Show your next meeting and a Join button.",
                     status: model.calendar
                 ) { model.requestCalendar() }
+                Divider()
+                PermissionRow(
+                    symbol: "checklist", tint: Feature.reminders.tint,
+                    title: "Reminders",
+                    detail: "Show a reminder in the notch when it's due, and mark it done.",
+                    status: model.reminders
+                ) { model.requestReminders() }
                 Divider()
                 PermissionRow(
                     symbol: "hand.point.up.left", tint: Feature.clipboard.tint,

@@ -10,6 +10,10 @@ struct ExpandedView: View {
                 .padding(.top, vm.notchSize.height + 4)
                 .padding(.bottom, 4)
                 .transition(.blurMorph)
+        } else if vm.showsFileTray {
+            FileTrayView(targeted: vm.fileTrayTargeted)
+                .padding(.top, vm.notchSize.height + 6)
+                .transition(.blurMorph)
         } else {
             mainContent
                 .transition(.blurMorph)
@@ -25,15 +29,16 @@ struct ExpandedView: View {
             ears
                 .frame(height: vm.notchSize.height)
 
-            if vm.availableTabs.count > 1 {
-                TabCapsule(vm: vm, symbol: symbol(for:))
-                    .padding(.top, 4)
-            }
-
             Group {
                 switch vm.visibleTab {
                 case nil:
                     Placeholder(symbol: "switch.2", text: "All features are off — turn some on from the menu bar icon")
+                case .home:
+                    HomePanel(vm: vm)
+                case .agents:
+                    AgentPanel(vm: vm, api: vm.api)
+                case .downloads:
+                    DownloadsList(downloads: vm.downloads)
                 case .nowPlaying:
                     nowPlaying
                 case .calendar:
@@ -41,7 +46,7 @@ struct ExpandedView: View {
                 case .clipboard:
                     ClipboardPanel(vm: vm, clipboard: vm.clipboard)
                 case .timer:
-                    TimerPanel(timer: vm.timer)
+                    TimerPanel(timer: vm.timer, live: vm.mode == .expanded)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -52,10 +57,15 @@ struct ExpandedView: View {
     /// Date on the left of the camera, battery on the right.
     private var ears: some View {
         HStack(spacing: 0) {
-            Text(Date(), format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                Text(Date(), format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                if vm.visibleTab == .home {
+                    HomeEditButton(vm: vm)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Color.clear
                 .frame(width: vm.notchSize.width)
             Group {
@@ -68,8 +78,11 @@ struct ExpandedView: View {
         }
     }
 
-    private func symbol(for tab: IslandViewModel.Tab) -> String {
+    static func symbol(for tab: IslandViewModel.Tab, vm: IslandViewModel) -> String {
         switch tab {
+        case .home: return "square.grid.2x2"
+        case .agents: return vm.showsAgentActivity ? "sparkles" : "checklist"
+        case .downloads: return "arrow.down.circle"
         case .nowPlaying: return "music.note"
         case .calendar: return vm.showsMeetingActivity ? "calendar.badge.clock" : "calendar"
         case .clipboard: return "clipboard"
@@ -80,38 +93,15 @@ struct ExpandedView: View {
     @ViewBuilder
     private var nowPlaying: some View {
         if let track = vm.nowPlaying.track {
-            NowPlayingPanel(track: track, artwork: vm.nowPlaying.artwork, ns: ns) { command in
-                vm.nowPlaying.send(command)
-            }
+            NowPlayingPanel(vm: vm, track: track, ns: ns)
         } else {
             MusicEmptyState()
         }
     }
 }
 
-struct TabButton: View {
-    let symbol: String
-    let tab: IslandViewModel.Tab
-    @ObservedObject var vm: IslandViewModel
-
-    var body: some View {
-        let selected = vm.visibleTab == tab
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) { vm.tab = tab }
-        } label: {
-            FeatureGlyph(feature: tab.feature, symbol: symbol, size: 11,
-                         color: selected ? Color.white : tab.tint.opacity(0.6))
-                .frame(width: 30, height: 22)
-                .background(Capsule().fill(tab.tint.opacity(selected ? 0.85 : 0)))
-                .shadow(color: selected ? tab.tint.opacity(0.4) : .clear, radius: 4)
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 struct MusicEmptyState: View {
-    private let installed = MediaSource.allCases.filter(\.isInstalled)
+    private let installed = MediaSource.allCases.filter { $0.isInstalled && !$0.isBrowser }
 
     var body: some View {
         DoodleEmptyState(
@@ -134,18 +124,65 @@ struct MusicEmptyState: View {
     }
 }
 
-/// Floating capsule of colour-coded tabs at the bottom of the island.
-struct TabCapsule: View {
+/// Floating tab bar under the open island: the selected tab shows its name.
+struct TabBar: View {
     @ObservedObject var vm: IslandViewModel
-    let symbol: (IslandViewModel.Tab) -> String
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(vm.availableTabs, id: \.self) { tab in
-                TabButton(symbol: symbol(tab), tab: tab, vm: vm)
+                let selected = vm.visibleTab == tab
+                Button {
+                    withAnimation(IslandViewModel.spring) { vm.tab = tab }
+                } label: {
+                    HStack(spacing: 6) {
+                        FeatureGlyph(feature: tab.feature, symbol: ExpandedView.symbol(for: tab, vm: vm), size: 12,
+                                     color: selected ? Color.white : Color.white.opacity(0.55))
+                        if selected {
+                            Text(tab.title)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.white)
+                                .fixedSize()
+                                .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .leading)))
+                        }
+                    }
+                    .padding(.horizontal, selected ? 12 : 10)
+                    .frame(height: IslandViewModel.tabBarHeight - 8)
+                    .background(Capsule().fill(selected ? Color.white.opacity(0.14) : Color.clear))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(tab.title)
             }
         }
-        .padding(2)
-        .background(Capsule().fill(Color.white.opacity(0.07)))
+        .padding(4)
+        .frame(height: IslandViewModel.tabBarHeight)
+        // Solid black, like the island itself (no glass, no see-through).
+        .background(Capsule().fill(Color.black))
+        .overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+/// Dashed drop zone shown while a file is dragged to the notch.
+struct FileTrayView: View {
+    let targeted: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: targeted ? "tray.and.arrow.down.fill" : "tray.fill")
+                .font(.system(size: 20, weight: .semibold))
+            Text(targeted ? "Drop to add" : "Files Tray")
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(Color.white.opacity(targeted ? 1 : 0.8))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(targeted ? 0.6 : 0.25), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(targeted ? 0.08 : 0.03)))
+        )
+        .scaleEffect(targeted ? 1.02 : 1)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: targeted)
     }
 }

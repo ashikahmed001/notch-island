@@ -11,6 +11,7 @@ struct AudioBars: NSViewRepresentable {
 
     func updateNSView(_ nsView: AudioBarsView, context: Context) {
         nsView.setColors(colors)
+        nsView.setAnimating(!Motion.reduced, capped: Energy.saver)
     }
 }
 
@@ -32,23 +33,47 @@ final class AudioBarsView: NSView {
         gradient.mask = barMask
         layer?.addSublayer(gradient)
 
-        for (index, duration) in durations.enumerated() {
+        for _ in durations {
             let bar = CALayer()
             bar.backgroundColor = NSColor.white.cgColor
             bar.cornerRadius = 1.5
             barMask.addSublayer(bar)
             bars.append(bar)
+        }
+        setAnimating(true, capped: Energy.saver)
+    }
 
-            let bounce = CABasicAnimation(keyPath: "transform.scale.y")
-            bounce.fromValue = 0.3
-            bounce.toValue = 1.0
-            bounce.duration = duration
-            bounce.autoreverses = true
-            bounce.repeatCount = .infinity
-            bounce.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            bounce.beginTime = CACurrentMediaTime() + Double(index) * 0.11
-            bounce.isRemovedOnCompletion = false
-            bar.add(bounce, forKey: "bounce")
+    private var isAnimating = false
+    private var isCapped = false
+    /// Resting heights when motion is reduced.
+    private let stillHeights: [CGFloat] = [0.55, 0.9, 0.4, 0.75]
+
+    /// Bouncing (capped at 30 fps — plenty for 3-pt bars, a fraction of a 120 Hz screen's work),
+    /// or standing still in Low Power Mode / Reduce motion.
+    func setAnimating(_ animating: Bool, capped: Bool) {
+        guard animating != isAnimating || capped != isCapped else { return }
+        isAnimating = animating
+        isCapped = capped
+        for (index, bar) in bars.enumerated() {
+            if animating {
+                bar.transform = CATransform3DIdentity
+                let bounce = CABasicAnimation(keyPath: "transform.scale.y")
+                bounce.fromValue = 0.3
+                bounce.toValue = 1.0
+                bounce.duration = durations[index]
+                bounce.autoreverses = true
+                bounce.repeatCount = .infinity
+                bounce.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                bounce.beginTime = CACurrentMediaTime() + Double(index) * 0.11
+                bounce.isRemovedOnCompletion = false
+                if capped {
+                    bounce.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+                }
+                bar.add(bounce, forKey: "bounce")
+            } else {
+                bar.removeAnimation(forKey: "bounce")
+                bar.transform = CATransform3DMakeScale(1, stillHeights[index], 1)
+            }
         }
     }
 

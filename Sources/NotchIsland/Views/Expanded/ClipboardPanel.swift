@@ -109,7 +109,9 @@ struct ClipCard: View {
             }
         }
         .frame(width: 104, height: 86)
-        .background(Color.white.opacity(item.isPinned ? 0.11 : 0.08))
+        .glassBackground(RoundedRectangle(cornerRadius: 10, style: .continuous),
+                         fallback: Color.white.opacity(item.isPinned ? 0.11 : 0.08),
+                         tint: item.isPinned ? tint.opacity(0.25) : nil)
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(tint.opacity(item.isPinned ? 0.45 : 0), lineWidth: 1)
@@ -254,5 +256,71 @@ struct ClipboardEmptyState: View {
         ) {
             ClipboardDoodle(accent: Feature.clipboard.tint)
         }
+    }
+}
+
+/// Each download in progress: name, size / time left, ring.
+struct DownloadsList: View {
+    @ObservedObject var downloads: DownloadsService
+
+    var body: some View {
+        let list = downloads.all
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(list.count == 1 ? "DOWNLOADING" : "DOWNLOADING · \(list.count)")
+                    .font(.system(size: 9.5, weight: .bold))
+                    .tracking(0.4)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let combined = downloads.active, list.count > 1, let detail = combined.detail {
+                    Text(detail)
+                        .font(.system(size: 10).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 6) {
+                    ForEach(Array(list.enumerated().reversed()), id: \.offset) { _, download in
+                        row(download)
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func row(_ download: DownloadsService.Download) -> some View {
+        let tint = Feature.downloads.tint
+        return HStack(spacing: 10) {
+            ZStack {
+                Circle().stroke(tint.opacity(0.22), lineWidth: 2.5)
+                if let fraction = download.fraction {
+                    Circle()
+                        .trim(from: 0, to: max(fraction, 0.02))
+                        .stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                } else {
+                    Spinner(tint: tint).padding(3)
+                }
+            }
+            .frame(width: 22, height: 22)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(download.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(download.detail ?? "Starting…")
+                    .font(.system(size: 10.5).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            if let fraction = download.fraction {
+                Text("\(Int((fraction * 100).rounded()))%")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(tint)
+            }
+        }
+        .frame(height: 30)
     }
 }

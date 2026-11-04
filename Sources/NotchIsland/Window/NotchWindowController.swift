@@ -15,6 +15,9 @@ final class NotchWindowController {
     private var suppressHoverUntilExit = false
     private var dragWatch: Timer?
     private var welcomeWork: DispatchWorkItem?
+    /// Drag pasteboard count when the button went down: a change means a drag started.
+    private var dragCountAtMouseDown = NSPasteboard(name: .drag).changeCount
+    private var fileDragActive = false
     private var cancellables = Set<AnyCancellable>()
 
     init(screen: NSScreen,
@@ -23,9 +26,14 @@ final class NotchWindowController {
          clipboard: ClipboardService,
          timer: TimerService,
          calendar: CalendarService,
+         reminders: ReminderService,
+         audioOutputs: AudioOutputService,
+         stats: SystemStatsService,
+         todos: TodoService,
          lock: LockService,
          screenshots: ScreenshotService,
          downloads: DownloadsService,
+         api: IslandAPIService,
          flags: FeatureFlags) {
         self.screen = screen
         viewModel = IslandViewModel(
@@ -35,14 +43,22 @@ final class NotchWindowController {
             clipboard: clipboard,
             timer: timer,
             calendar: calendar,
+            reminders: reminders,
+            audioOutputs: audioOutputs,
+            stats: stats,
+            todos: todos,
             lock: lock,
             screenshots: screenshots,
             downloads: downloads,
+            api: api,
             flags: flags
         )
 
-        let expanded = viewModel.expandedSize
-        let size = CGSize(width: expanded.width + 2 * Self.margin, height: expanded.height + Self.margin)
+        viewModel.hasHardwareNotch = NotchGeometry.hasNotch(screen)
+
+        let expanded = IslandViewModel.maxExpandedSize
+        let size = CGSize(width: expanded.width + 2 * Self.margin,
+                          height: expanded.height + IslandViewModel.tabBarHeight + IslandViewModel.tabBarGap + Self.margin)
         let frame = NSRect(
             x: screen.frame.midX - size.width / 2,
             y: screen.frame.maxY - size.height,
@@ -77,6 +93,52 @@ final class NotchWindowController {
                           !self.hotRect().contains(NSEvent.mouseLocation) {
                     self.setExpanded(false)
                 }
+            }
+            .store(in: &cancellables)
+
+        // Home ▸ Add a task: let the panel take typing, and stop when focus leaves.
+        viewModel.$isAddingTodo
+            .removeDuplicates()
+            .sink { [weak self] adding in
+                guard let self else { return }
+                self.panel.allowsKey = adding
+                if adding { self.panel.makeKey() }
+            }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification, object: panel)
+            .sink { [weak self] _ in
+                guard let self, self.viewModel.isAddingTodo else { return }
+                self.viewModel.isAddingTodo = false
+            }
+            .store(in: &cancellables)
+
+        // Command Bar: take typing and clicks while it's open; close it when focus leaves.
+        viewModel.$showsCommandBar
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] showing in
+                guard let self else { return }
+                self.collapseWork?.cancel()
+                self.collapseWork = nil
+                self.panel.allowsKey = showing || self.viewModel.isAddingTodo
+                if showing {
+                    self.panel.ignoresMouseEvents = false
+                    self.panel.makeKey()
+                } else {
+                    self.panel.ignoresMouseEvents = self.viewModel.mode == .collapsed && !self.viewModel.isClickablePeek
+                    // Don't pop the island open just because the pointer happens to be there.
+                    self.suppressHoverUntilExit = self.hotRect().contains(NSEvent.mouseLocation)
+                }
+            }
+            .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification, object: panel)
+            .sink { [weak self] _ in self?.viewModel.closeCommandBar() }
+            .store(in: &cancellables)
+
+        // CPU is only sampled while the Home tab is on screen.
+        viewModel.$tab
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.updateStatsSampling() }
             }
             .store(in: &cancellables)
 
@@ -151,6 +213,13 @@ final class NotchWindowController {
         }
     }
 
+    /// The screen this island lives on (to open the Command Bar where the pointer is).
+    var screenFrame: NSRect { screen.frame }
+
+    func toggleCommandBar() {
+        viewModel.toggleCommandBar()
+    }
+
     func close() {
         monitors.forEach { NSEvent.removeMonitor($0) }
         monitors.removeAll()
@@ -177,18 +246,42 @@ final class NotchWindowController {
         }) {
             monitors.append(local)
         }
+        // Button down / up: tells file drags (→ Files Tray) apart from ordinary clicks.
+        if let buttons = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp], handler: { [weak self] event in
+            guard let self else { return }
+            if event.type == .leftMouseDown {
+                self.dragCountAtMouseDown = NSPasteboard(name: .drag).changeCount
+            } else if self.fileDragActive {
+                self.endFileDrag()
+            }
+        }) {
+            monitors.append(buttons)
+        }
     }
 
     private func evaluateMouse() {
         let point = NSEvent.mouseLocation
+
+        // Dragging a file toward the notch → Files Tray.
+        if trackFileDrag(at: point) { return }
+
+        // Fast path (this runs on every mouse move): island closed, nothing being held,
+        // and the pointer is well below the top of this screen → nothing to do.
+        if viewModel.mode == .collapsed, !fileDragActive, !viewModel.noticeHovered, !viewModel.isAlerting,
+           !viewModel.showsCommandBar,
+           !screen.frame.contains(point) || point.y < screen.frame.maxY - 240 {
+            suppressHoverUntilExit = false
+            if !panel.ignoresMouseEvents { panel.ignoresMouseEvents = true }
+            return
+        }
 
         if suppressHoverUntilExit {
             if !hotRect().contains(point) { suppressHoverUntilExit = false }
             return
         }
 
-        // Ringing timer: stay open regardless of where the mouse is.
-        if viewModel.isAlerting {
+        // Ringing timer, or typing a to-do: stay open regardless of where the mouse is.
+        if viewModel.isAlerting || viewModel.isAddingTodo || viewModel.showsCommandBar {
             collapseWork?.cancel()
             collapseWork = nil
             return
@@ -202,10 +295,34 @@ final class NotchWindowController {
             return
         }
 
+        // Meeting about to start: the Join button beside the camera takes clicks.
+        if viewModel.compactJoinMeeting != nil, joinRect().contains(point) {
+            panel.ignoresMouseEvents = false
+            collapseWork?.cancel()
+            collapseWork = nil
+            return
+        }
+
+        // A meeting / reminder notice: hovering holds it and makes it clickable,
+        // instead of opening the island.
+        if viewModel.isClickablePeek {
+            let inside = hotRect().contains(point)
+            panel.ignoresMouseEvents = !inside
+            if inside != viewModel.noticeHovered {
+                withAnimation(.easeOut(duration: 0.15)) { viewModel.noticeHovered = inside }
+                viewModel.holdPeek(inside)
+            }
+            return
+        } else if viewModel.mode == .collapsed, !panel.ignoresMouseEvents {
+            panel.ignoresMouseEvents = true
+        }
+
         if hotRect().contains(point) {
             collapseWork?.cancel()
             collapseWork = nil
-            if viewModel.mode != .expanded { setExpanded(true) }
+            if viewModel.mode != .expanded {
+                setExpanded(true, preferSecondary: bubbleRect()?.contains(point) == true)
+            }
         } else if viewModel.mode == .expanded, collapseWork == nil {
             let work = DispatchWorkItem { [weak self] in
                 self?.collapseWork = nil
@@ -232,22 +349,96 @@ final class NotchWindowController {
     private func hotRect() -> NSRect {
         let size = viewModel.mode == .expanded ? viewModel.expandedSize : viewModel.currentSize
         let pad: CGFloat = viewModel.mode == .expanded ? 8 : 4
-        return NSRect(
+        // The floating tab bar under the open island counts too.
+        let bar = viewModel.showsTabBar ? IslandViewModel.tabBarHeight + IslandViewModel.tabBarGap : 0
+        let island = NSRect(
             x: screen.frame.midX - size.width / 2 - pad,
-            y: screen.frame.maxY - size.height - pad,
+            y: screen.frame.maxY - size.height - bar - pad,
             width: size.width + 2 * pad,
-            height: size.height + pad + 4   // +4 so the very top pixel row counts
+            height: size.height + bar + pad + 4   // +4 so the very top pixel row counts
         )
+        return bubbleRect().map { island.union($0) } ?? island
     }
 
-    private func setExpanded(_ expanded: Bool) {
+    /// The right "ear" of the collapsed island, where the Join button sits.
+    private func joinRect() -> NSRect {
+        let notch = viewModel.notchSize
+        let half = viewModel.currentSize.width / 2
+        return NSRect(x: screen.frame.midX + notch.width / 2, y: screen.frame.maxY - notch.height - 2,
+                      width: half - notch.width / 2 + 4, height: notch.height + 4)
+    }
+
+    // MARK: - Files Tray
+
+    /// - Returns: true while a file drag is being handled (skip normal hover logic).
+    private func trackFileDrag(at point: NSPoint) -> Bool {
+        guard NSEvent.pressedMouseButtons & 1 != 0, !viewModel.isDragging, viewModel.flags.isOn(.clipboard) else {
+            if fileDragActive { endFileDrag() }
+            return false
+        }
+        let board = NSPasteboard(name: .drag)
+        guard board.changeCount != dragCountAtMouseDown, board.types?.contains(.fileURL) == true else { return false }
+
+        // Close to the notch, or over the open tray.
+        let near = NSRect(x: screen.frame.midX - 280, y: screen.frame.maxY - 150, width: 560, height: 150)
+        if near.contains(point) || (fileDragActive && hotRect().contains(point)) {
+            if !fileDragActive {
+                fileDragActive = true
+                collapseWork?.cancel()
+                collapseWork = nil
+                withAnimation(IslandViewModel.spring) { viewModel.showsFileTray = true }
+                if viewModel.mode != .expanded { setExpanded(true) }
+            }
+        } else if fileDragActive {
+            endFileDrag()
+        }
+        return fileDragActive
+    }
+
+    /// The drag ended or left: put the tray away (after a beat, so a drop can land first).
+    private func endFileDrag() {
+        fileDragActive = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.viewModel.showsFileTray else { return }
+            withAnimation(IslandViewModel.spring) {
+                self.viewModel.showsFileTray = false
+                self.viewModel.fileTrayTargeted = false
+            }
+            if !self.hotRect().contains(NSEvent.mouseLocation) { self.setExpanded(false) }
+        }
+    }
+
+    private func updateStatsSampling() {
+        viewModel.stats.isActive = viewModel.mode == .expanded && viewModel.visibleTab == .home && viewModel.welcome == nil
+    }
+
+    /// The split bubble's area, when one is showing.
+    private func bubbleRect() -> NSRect? {
+        guard viewModel.secondaryActivity != nil else { return nil }
+        let size = viewModel.bubbleSize
+        let centerX = screen.frame.midX + viewModel.bubbleOffset
+        return NSRect(x: centerX - size.width / 2 - 4, y: screen.frame.maxY - size.height - 4,
+                      width: size.width + 8, height: size.height + 8)
+    }
+
+    private func setExpanded(_ expanded: Bool, preferSecondary: Bool = false) {
         if expanded, viewModel.mode != .expanded {
-            viewModel.selectTabForCurrentActivity()
+            viewModel.selectTabForCurrentActivity(preferSecondary: preferSecondary)
         }
         withAnimation(expanded ? IslandViewModel.spring : IslandViewModel.collapseSpring) {
             viewModel.mode = expanded ? .expanded : .collapsed
         }
         panel.ignoresMouseEvents = !expanded
+        updateStatsSampling()
+        if !expanded {
+            // Once tucked away, reset the calendar to today and close the output list.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self, self.viewModel.mode == .collapsed else { return }
+                self.viewModel.showsAudioPicker = false
+                self.viewModel.isEditingHome = false
+                self.viewModel.calendar.resetDashboard()
+            }
+        }
         if expanded, viewModel.flags.isOn(.hoverHaptics) {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         }

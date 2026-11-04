@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime permissions for the Developer ID build (not sandboxed).
+  Only what the app actually uses: without these, macOS silently blocks the feature.
+-->
+<plist version="1.0">
+<dict>
+    <!-- Music, Spotify and browser media via AppleScript (NSAppleEventsUsageDescription). -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    <!-- Calendar and Reminders via EventKit (NSCalendars/NSReminders usage descriptions). -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+</dict>
+</plist>

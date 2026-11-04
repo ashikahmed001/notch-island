@@ -10,9 +10,14 @@ struct Meeting: Equatable, Identifiable {
     let color: NSColor
     /// Zoom / Meet / Teams / Webex… link found in the event's URL, location or notes.
     let joinURL: URL?
+    /// Stable across devices; used to open the event in Calendar.
+    let externalID: String?
+    let isAllDay: Bool
 
     init(event: EKEvent) {
         id = event.eventIdentifier ?? UUID().uuidString
+        externalID = event.calendarItemExternalIdentifier
+        isAllDay = event.isAllDay
         title = (event.title?.isEmpty == false ? event.title : nil) ?? "Untitled event"
         start = event.startDate
         end = event.endDate
@@ -62,7 +67,8 @@ struct Meeting: Equatable, Identifiable {
     }
 
     var timeRange: String {
-        "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
+        if isAllDay { return "All day" }
+        return "\(start.formatted(date: .omitted, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))"
     }
 
     private static func duration(_ minutes: Int) -> String {

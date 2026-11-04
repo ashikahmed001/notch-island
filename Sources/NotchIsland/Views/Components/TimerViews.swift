@@ -3,9 +3,11 @@ import SwiftUI
 struct TimerRing: View {
     @ObservedObject var timer: TimerService
     var lineWidth: CGFloat = 3
+    /// false while the view is loaded but unseen (closed island) → no ticking.
+    var live = true
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(LiveSchedule(live: live)) { context in
             let fraction = timer.fractionRemaining(at: context.date)
             let tint = timer.tint(at: context.date)
             ZStack {
@@ -24,9 +26,10 @@ struct TimerRing: View {
 struct TimerText: View {
     @ObservedObject var timer: TimerService
     var size: CGFloat
+    var live = true
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(LiveSchedule(live: live)) { context in
             Text(TimerService.format(timer.remaining(at: context.date)))
                 .font(.system(size: size, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(timer.tint(at: context.date))

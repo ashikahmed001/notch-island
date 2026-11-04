@@ -1,50 +1,260 @@
 import SwiftUI
+import CoreAudio
 
 struct NowPlayingPanel: View {
+    @ObservedObject var vm: IslandViewModel
     let track: TrackInfo
-    let artwork: NSImage?
     let ns: Namespace.ID
-    /// Progress bar colours. Empty (the default) → the Music pink, matching the app theme.
-    /// Pass artwork colours here to tint it like the audio bars instead.
-    var colors: [NSColor] = []
-    let onCommand: (NowPlayingService.Command) -> Void
+
+    private var player: NowPlayingService { vm.nowPlaying }
 
     var body: some View {
-        HStack(spacing: 14) {
-            ArtworkView(image: artwork, cornerRadius: 10)
-                .frame(width: 72, height: 72)
-                .overlay(alignment: .bottomTrailing) {
-                    SourceBadge(source: track.source)
-                        .offset(x: 6, y: 6)
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                ArtworkView(image: player.artwork, cornerRadius: 10)
+                    .frame(width: 56, height: 56)
+                    .overlay(alignment: .bottomTrailing) {
+                        SourceBadge(source: track.source)
+                            .offset(x: 6, y: 6)
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(track.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                    Text(track.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    ProgressRow(track: track, live: vm.mode == .expanded)
                 }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(track.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .lineLimit(1)
-                Text(track.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                ProgressRow(track: track, colors: colors)
-                HStack(spacing: 22) {
-                    controlButton("backward.fill", .previous)
-                    controlButton(track.isPlaying ? "pause.fill" : "play.fill", .playPause, size: 18)
-                    controlButton("forward.fill", .next)
+                if track.isPlaying {
+                    AudioBars(colors: player.artworkColors)
+                        .frame(width: 18, height: 14)
+                        .frame(maxHeight: .infinity, alignment: .top)
                 }
-                .frame(maxWidth: .infinity)
+            }
+            .frame(height: 56)
+
+            controls
+
+            if vm.showsAudioPicker {
+                AudioPicker(vm: vm)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    /// repeat · shuffle   ◀◀  ( ❚❚ )  ▶▶   output
+    private var controls: some View {
+        HStack(spacing: 0) {
+            if track.source.isBrowser {
+                // Web players: no shuffle / repeat to control — show where it's playing.
+                Label(track.source.displayName, systemImage: track.source.symbol)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.45))
+                    .lineLimit(1)
+                    .frame(width: 60, alignment: .leading)
+            } else {
+                toggleButton(track.repeatMode.symbol, on: track.repeatMode != .off, help: "Repeat") { player.cycleRepeat() }
+                toggleButton("shuffle", on: track.shuffle, help: "Shuffle") { player.toggleShuffle() }
+            }
+            Spacer(minLength: 8)
+            skipButton("backward.fill") { player.send(.previous) }
+            Button { player.send(.playPause) } label: {
+                Image(systemName: track.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 42, height: 42)
+                    .glassBackground(Circle(), fallback: Color.white.opacity(0.12))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+            skipButton("forward.fill") { player.send(.next) }
+            Spacer(minLength: 8)
+            outputButton
+        }
+        .frame(height: 42)
+    }
+
+    private var outputButton: some View {
+        let open = vm.showsAudioPicker
+        let symbol = player.isOnAirPlaySpeaker ? "airplayaudio" : (vm.audioOutputs.current?.symbol ?? "speaker.wave.2.fill")
+        return Button {
+            withAnimation(IslandViewModel.spring) { vm.showsAudioPicker.toggle() }
+            if vm.showsAudioPicker { player.loadAirPlayTargets() }
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(open ? Color.black : Color.white)
+                .frame(width: 34, height: 30)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(open ? Color.white : Color.white.opacity(0.1)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Sound output")
+    }
+
+    private func toggleButton(_ symbol: String, on: Bool, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(on ? Feature.nowPlaying.tint : Color.white.opacity(0.45))
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func skipButton(_ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(width: 36, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Output | Apps: where the sound goes, and which player is in charge.
+struct AudioPicker: View {
+    @ObservedObject var vm: IslandViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1)
+                .padding(.top, 2)
+            segmented
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 0) {
+                    switch vm.audioPickerTab {
+                    case .output: outputRows
+                    case .apps: appRows
+                    }
+                }
+            }
+            .frame(height: CGFloat(min(vm.audioPickerRows, IslandViewModel.audioVisibleRows)) * IslandViewModel.audioRowHeight)
+        }
+    }
+
+    private var segmented: some View {
+        HStack(spacing: 2) {
+            segment("Output", .output)
+            segment("Apps", .apps)
+        }
+        .padding(2)
+        .background(Capsule().fill(Color.white.opacity(0.08)))
+        .frame(height: 28)
+    }
+
+    private func segment(_ title: String, _ tab: IslandViewModel.AudioPickerTab) -> some View {
+        let selected = vm.audioPickerTab == tab
+        return Button {
+            withAnimation(IslandViewModel.spring) { vm.audioPickerTab = tab }
+        } label: {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(selected ? Color.white : Color.white.opacity(0.5))
+                .padding(.horizontal, 12)
+                .frame(height: 24)
+                .background(Capsule().fill(selected ? Color.white.opacity(0.16) : Color.clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var outputRows: some View {
+        let outputs = vm.audioOutputs
+        let player = vm.nowPlaying
+        let onSpeaker = player.isOnAirPlaySpeaker
+        ForEach(outputs.devices) { device in
+            AudioRow(symbol: device.symbol, title: device.name,
+                     selected: !onSpeaker && device.id == outputs.currentID,
+                     accent: device.transport == kAudioDeviceTransportTypeBuiltIn) {
+                if onSpeaker { player.selectAirPlay(nil) }
+                outputs.select(device)
+            }
+        }
+        ForEach(player.airPlayTargets) { target in
+            AudioRow(symbol: target.symbol, title: target.name, detail: "AirPlay · Music",
+                     selected: target.isSelected, accent: false) {
+                player.selectAirPlay(target)
             }
         }
     }
 
-    private func controlButton(_ symbol: String, _ command: NowPlayingService.Command, size: CGFloat = 14) -> some View {
-        Button {
-            onCommand(command)
-        } label: {
-            Image(systemName: symbol)
-                .font(.system(size: size, weight: .semibold))
-                .frame(width: 28, height: 24)
-                .contentShape(Rectangle())
+    @ViewBuilder
+    private var appRows: some View {
+        let player = vm.nowPlaying
+        ForEach(MediaSource.allCases.filter(\.isInstalled), id: \.self) { source in
+            let isCurrent = player.track?.source == source
+            let detail = player.browsersNeedingSetup.contains(source)
+                ? "Needs “Allow JavaScript from Apple Events”"
+                : isCurrent
+                ? (player.track?.isPlaying == true ? "Playing" : "Paused")
+                : (source.isRunning ? "Open" : "Not running")
+            AudioRow(icon: source.appIcon, symbol: source.symbol, title: source.displayName, detail: detail,
+                     selected: isCurrent, accent: false) {
+                player.switchTo(source)
+            }
+            .help(source.isBrowser ? "To show what plays in \(source.displayName): \(source.javaScriptSetting)" : "")
+        }
+    }
+}
+
+/// One line in the picker: icon tile, name, ✓.
+struct AudioRow: View {
+    var icon: NSImage? = nil
+    let symbol: String
+    let title: String
+    var detail: String? = nil
+    let selected: Bool
+    let accent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Group {
+                    if let icon {
+                        Image(nsImage: icon).resizable().interpolation(.high)
+                    } else {
+                        Image(systemName: symbol)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(selected && accent ? Color.blue : Color.white.opacity(selected ? 0.18 : 0.08)))
+                    }
+                }
+                .frame(width: 26, height: 26)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    if let detail {
+                        Text(detail)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 4)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                }
+            }
+            .frame(height: IslandViewModel.audioRowHeight)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -53,6 +263,8 @@ struct NowPlayingPanel: View {
 struct ProgressRow: View {
     let track: TrackInfo
     var colors: [NSColor] = []
+    /// false while the island is closed: this view stays loaded but nobody sees it.
+    var live = true
 
     /// Identity of the current palette, used to cross-fade between palettes.
     private var paletteKey: String {
@@ -86,7 +298,7 @@ struct ProgressRow: View {
             .frame(height: 14)
         } else if track.duration <= 0 {
             // Length unknown: show elapsed time only, no fake progress bar.
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            TimelineView(LiveSchedule(live: live && track.isPlaying)) { context in
                 HStack(spacing: 8) {
                     Text(Self.format(track.currentPosition(at: context.date)))
                     Capsule().fill(Color.white.opacity(0.2)).frame(height: 4)
@@ -95,7 +307,7 @@ struct ProgressRow: View {
                 .foregroundStyle(.secondary)
             }
         } else {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            TimelineView(LiveSchedule(live: live && track.isPlaying)) { context in
                 let position = track.currentPosition(at: context.date)
                 let fraction = track.duration > 0 ? min(max(position / track.duration, 0), 1) : 0
                 HStack(spacing: 8) {

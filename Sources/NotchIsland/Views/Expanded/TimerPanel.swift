@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TimerPanel: View {
     @ObservedObject var timer: TimerService
+    /// The open island is showing (no ticking while it's closed).
+    var live = true
     private let presets: [Double] = [1, 5, 10, 15, 25, 45]
 
     var body: some View {
@@ -18,7 +20,7 @@ struct TimerPanel: View {
                             Text("\(Int(minutes))m")
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .frame(width: 46, height: 30)
-                                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.1)))
+                                .glassBackground(RoundedRectangle(cornerRadius: 8, style: .continuous), fallback: Color.white.opacity(0.1))
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -55,7 +57,7 @@ struct TimerPanel: View {
                             .fixedSize()   // never truncate to "+1…"
                             .padding(.horizontal, 10)
                             .frame(height: 26)
-                            .background(Capsule().fill(Color.white.opacity(0.1)))
+                            .glassBackground(Capsule(), fallback: Color.white.opacity(0.1))
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -69,7 +71,7 @@ struct TimerPanel: View {
             let paused = timer.state == .paused
             HStack(spacing: 16) {
                 ZStack {
-                    TimerRing(timer: timer, lineWidth: 5)
+                    TimerRing(timer: timer, lineWidth: 5, live: live)
                     Image(systemName: paused ? "pause.fill" : "timer")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color.orange.opacity(paused ? 0.45 : 0.9))
@@ -77,7 +79,7 @@ struct TimerPanel: View {
                 .frame(width: 58, height: 58)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    TimerText(timer: timer, size: 32)
+                    TimerText(timer: timer, size: 32, live: live)
                     Text(paused ? "Paused" : "Ends at \(Date().addingTimeInterval(timer.remaining()).formatted(date: .omitted, time: .shortened))")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
@@ -93,7 +95,7 @@ struct TimerPanel: View {
                             .fixedSize()   // never truncate to "+1…"
                             .padding(.horizontal, 10)
                             .frame(height: 26)
-                            .background(Capsule().fill(Color.white.opacity(0.1)))
+                            .glassBackground(Capsule(), fallback: Color.white.opacity(0.1))
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -116,7 +118,8 @@ struct TimerPanel: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(tint)
                 .frame(width: 38, height: 38)
-                .background(Circle().fill(tint.opacity(tint == .white ? 0.12 : 0.22)))
+                .glassBackground(Circle(), fallback: tint.opacity(tint == .white ? 0.12 : 0.22),
+                                 tint: tint == .white ? nil : tint.opacity(0.4))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

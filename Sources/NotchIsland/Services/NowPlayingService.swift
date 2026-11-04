@@ -19,6 +19,22 @@ final class NowPlayingService: ObservableObject {
     /// Two vivid colours from the artwork (for the audio-bar gradient). Empty → white.
     @Published private(set) var artworkColors: [NSColor] = []
 
+    /// Speakers Music can play to directly (HomePod, Apple TV, AirPlay speakers).
+    struct AirPlayTarget: Identifiable, Equatable {
+        let name: String
+        let kind: String
+        let isSelected: Bool
+        var id: String { name }
+
+        var symbol: String {
+            let lower = "\(kind) \(name)".lowercased()
+            if lower.contains("homepod") { return "homepod.fill" }
+            if lower.contains("apple tv") || lower.contains("tv") { return "appletv.fill" }
+            return "hifispeaker.fill"
+        }
+    }
+    @Published private(set) var airPlayTargets: [AirPlayTarget] = []
+
     var isActivelyPlaying: Bool { track?.isPlaying == true }
 
     /// Feature flag. Starts off; the app enables it after the launch greeting.
@@ -39,6 +55,10 @@ final class NowPlayingService: ObservableObject {
 
     /// Feature flag: allow the iTunes Search API fallback for covers.
     var allowsOnlineLookup = true
+    /// Feature flag: also look for video / audio playing in Safari, Chrome, Edge and Brave tabs.
+    var includesBrowsers = true
+    /// Browsers that are running but block "Allow JavaScript from Apple Events".
+    @Published private(set) var browsersNeedingSetup: Set<MediaSource> = []
 
     private static let separator = "~|~"
 
@@ -82,11 +102,24 @@ final class NowPlayingService: ObservableObject {
             observers.append((workspace, token))
         }
 
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
-        timer?.tolerance = 1
+        schedulePolling(every: Self.idlePoll)
         refresh()
+    }
+
+    /// Music and Spotify announce play / pause / song changes themselves, so a slow
+    /// double-check is enough — except for radio, where the song on air changes silently.
+    private static let idlePoll: TimeInterval = 15
+    private static let radioPoll: TimeInterval = 3
+    private var pollInterval: TimeInterval = 0
+
+    private func schedulePolling(every interval: TimeInterval) {
+        guard interval != pollInterval else { return }
+        pollInterval = interval
+        timer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.refresh() }
+        timer.tolerance = interval * 0.2
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     deinit {
@@ -98,7 +131,18 @@ final class NowPlayingService: ObservableObject {
 
     func send(_ command: Command) {
         guard isEnabled, let source = track?.source else { return }
-        runScript("tell application id \"\(source.bundleID)\" to \(command.rawValue)") { _ in }
+        if source.isBrowser {
+            guard let tab = track?.browserTab else { return }
+            let js: String
+            switch command {
+            case .playPause: js = BrowserMedia.playPause
+            case .next: js = BrowserMedia.next
+            case .previous: js = BrowserMedia.previous
+            }
+            runScript(BrowserMedia.control(source, tab: tab, javaScript: js)) { _ in }
+        } else {
+            runScript("tell application id \"\(source.bundleID)\" to \(command.rawValue)") { _ in }
+        }
         if command == .playPause, var current = track {
             current.position = current.currentPosition(at: Date())
             current.positionTimestamp = Date()
@@ -108,6 +152,102 @@ final class NowPlayingService: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.refresh() }
     }
 
+    func toggleShuffle() {
+        guard isEnabled, var current = track, !current.source.isBrowser else { return }
+        let script = current.source == .music
+            ? "tell application id \"\(current.source.bundleID)\" to set shuffle enabled to not shuffle enabled"
+            : "tell application id \"\(current.source.bundleID)\" to set shuffling to not shuffling"
+        runScript(script) { _ in }
+        current.shuffle.toggle()
+        track = current
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.refresh() }
+    }
+
+    /// Off → all → one → off (Spotify: off ↔ on).
+    func cycleRepeat() {
+        guard isEnabled, var current = track, !current.source.isBrowser else { return }
+        let next: TrackInfo.RepeatMode
+        let script: String
+        if current.source == .music {
+            next = current.repeatMode == .off ? .all : (current.repeatMode == .all ? .one : .off)
+            script = "tell application id \"\(current.source.bundleID)\" to set song repeat to \(next.rawValue)"
+        } else {
+            next = current.repeatMode == .off ? .all : .off
+            script = "tell application id \"\(current.source.bundleID)\" to set repeating to \(next == .off ? "false" : "true")"
+        }
+        runScript(script) { _ in }
+        current.repeatMode = next
+        track = current
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.refresh() }
+    }
+
+    /// Apps tab: make another player the one that's playing.
+    func switchTo(_ source: MediaSource) {
+        guard isEnabled else { return }
+        if source.isBrowser || track?.source == source {
+            source.launch()
+            return
+        }
+        if let current = track, current.isPlaying {
+            runScript("tell application id \"\(current.source.bundleID)\" to pause") { _ in }
+        }
+        if source.isRunning {
+            runScript("tell application id \"\(source.bundleID)\" to play") { _ in }
+        } else {
+            source.launch()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.refresh() }
+    }
+
+    /// Music's AirPlay speakers (Spotify doesn't expose its devices).
+    func loadAirPlayTargets() {
+        guard isEnabled, track?.source == .music, MediaSource.music.isRunning else {
+            if !airPlayTargets.isEmpty { airPlayTargets = [] }
+            return
+        }
+        let sep = Self.separator
+        let script = """
+        tell application id "\(MediaSource.music.bundleID)"
+            set out to ""
+            repeat with d in AirPlay devices
+                try
+                    if available of d then
+                        set out to out & (name of d) & "\(sep)" & ((kind of d) as string) & "\(sep)" & ((selected of d) as string) & linefeed
+                    end if
+                end try
+            end repeat
+            return out
+        end tell
+        """
+        runScript(script) { [weak self] result in
+            guard let self else { return }
+            let lines = (result?.stringValue ?? "").split(separator: "\n")
+            let targets = lines.compactMap { line -> AirPlayTarget? in
+                let parts = line.components(separatedBy: sep)
+                guard parts.count >= 3, parts[1] != "computer" else { return nil }
+                return AirPlayTarget(name: parts[0], kind: parts[1], isSelected: parts[2] == "true")
+            }
+            if targets != self.airPlayTargets { self.airPlayTargets = targets }
+        }
+    }
+
+    /// Send Music to an AirPlay speaker (nil = back to this Mac).
+    func selectAirPlay(_ target: AirPlayTarget?) {
+        guard MediaSource.music.isRunning else { return }
+        let bundle = MediaSource.music.bundleID
+        let script: String
+        if let target {
+            let name = target.name.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            script = "tell application id \"\(bundle)\" to set current AirPlay devices to {AirPlay device \"\(name)\"}"
+        } else {
+            script = "tell application id \"\(bundle)\" to set current AirPlay devices to (every AirPlay device whose kind is computer)"
+        }
+        runScript(script) { [weak self] _ in self?.loadAirPlayTargets() }
+    }
+
+    /// Music is playing to an AirPlay speaker rather than this Mac.
+    var isOnAirPlaySpeaker: Bool { airPlayTargets.contains(where: \.isSelected) }
+
     func refresh() {
         guard isEnabled, !isPaused else { return }
         guard !refreshInFlight else {
@@ -116,7 +256,9 @@ final class NowPlayingService: ObservableObject {
         }
         // Only talk to players that are already running — `tell application`
         // would otherwise launch them.
-        let sources = MediaSource.allCases.filter { $0.isInstalled && $0.isRunning }
+        let sources = MediaSource.allCases.filter {
+            $0.isInstalled && $0.isRunning && (!$0.isBrowser || includesBrowsers)
+        }
         guard !sources.isEmpty else {
             apply([])
             return
@@ -139,8 +281,14 @@ final class NowPlayingService: ObservableObject {
     // MARK: - State (main thread)
 
     private func apply(_ raws: [RawTrack]) {
+        let blocked = Set(raws.filter { $0.parts.first == "JSOFF" }.map(\.source))
+        if blocked != browsersNeedingSetup { browsersNeedingSetup = blocked }
         let candidates = raws.compactMap(makeTrack)
         let newTrack = candidates.first(where: { $0.isPlaying }) ?? candidates.first
+        // Radio and browsers don't announce changes — check every 3 s while they play.
+        // Battery saver off → every 3 s, like before.
+        let needsWatching = newTrack.map { ($0.isLive || $0.source.isBrowser) && $0.isPlaying } == true
+        schedulePolling(every: needsWatching || !Energy.saver ? Self.radioPoll : Self.idlePoll)
 
         switch (track, newTrack) {
         case (nil, nil):
@@ -171,6 +319,7 @@ final class NowPlayingService: ObservableObject {
     }
 
     private func makeTrack(_ raw: RawTrack) -> TrackInfo? {
+        if raw.source.isBrowser { return makeBrowserTrack(raw) }
         let parts = raw.parts
         var title = parts[1]
         var artist = parts[2]
@@ -212,7 +361,32 @@ final class NowPlayingService: ObservableObject {
             isLive: isRadio,
             hasSongInfo: !isRadio || !streamTitle.isEmpty,
             source: raw.source,
-            positionTimestamp: Date()
+            positionTimestamp: Date(),
+            shuffle: parts.count > 9 && parts[9] == "true",
+            repeatMode: Self.repeatMode(parts.count > 10 ? parts[10] : "off")
+        )
+    }
+
+    /// state, title, artist, album, duration, position, artwork, window id, tab index
+    private func makeBrowserTrack(_ raw: RawTrack) -> TrackInfo? {
+        let parts = raw.parts
+        guard parts.count >= 9, let window = Int(parts[7]), let tab = Int(parts[8]) else { return nil }
+        let title = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        let duration = Self.number(parts[4])
+        return TrackInfo(
+            title: title,
+            artist: parts[2],
+            album: parts[3],
+            duration: duration,
+            position: Self.number(parts[5]),
+            isPlaying: parts[0] == "playing",
+            isLive: duration <= 0,
+            hasSongInfo: true,
+            source: raw.source,
+            positionTimestamp: Date(),
+            browserTab: TrackInfo.BrowserTab(window: window, tab: tab),
+            artworkURL: parts[6].isEmpty ? nil : parts[6]
         )
     }
 
@@ -245,6 +419,15 @@ final class NowPlayingService: ObservableObject {
                     self.fetchCatalogArtwork(term: "\(track.title) \(track.artist)", expectedID: expectedID)
                 }
             }
+
+        case .safari, .chrome, .edge, .brave:
+            // The page's media artwork, or its preview image (e.g. the YouTube thumbnail).
+            guard let string = track.artworkURL, let url = URL(string: string),
+                  url.scheme == "https" || url.scheme == "http" else { return }
+            URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+                guard let data else { return }
+                DispatchQueue.main.async { self?.setArtwork(data, for: expectedID) }
+            }.resume()
 
         case .spotify:
             runScript("tell application id \"\(track.source.bundleID)\" to get artwork url of current track") { result in
@@ -304,12 +487,20 @@ final class NowPlayingService: ObservableObject {
 
     private func queryRaw(_ source: MediaSource) -> RawTrack? {
         let sep = Self.separator
+        if source.isBrowser {
+            guard let output = execute(BrowserMedia.query(source, separator: sep))?.stringValue, !output.isEmpty else { return nil }
+            if output == "JSOFF" { return RawTrack(source: source, parts: ["JSOFF"]) }
+            return RawTrack(source: source, parts: output.components(separatedBy: sep))
+        }
         let durationExpr = source == .spotify ? "((duration of theTrack) / 1000)" : "(duration of theTrack)"
         // Only Music has radio stations; their "current stream title" is the song on air.
         let streamExpr = source == .music ? "current stream title" : "\"\""
         // Fallbacks when `duration` is missing (common for streamed Apple Music tracks).
         let finishExpr = source == .music ? "finish of theTrack" : "0"
         let timeExpr = source == .music ? "time of theTrack" : "\"\""
+        // Music: shuffle enabled / song repeat (off, one, all). Spotify: shuffling / repeating (on/off).
+        let shuffleExpr = source == .music ? "shuffle enabled" : "shuffling"
+        let repeatExpr = source == .music ? "song repeat" : "repeating"
         // Radio stations are URL tracks / have a stream URL, even between songs.
         let radioBlock = source == .music ? """
             try
@@ -368,7 +559,15 @@ final class NowPlayingService: ObservableObject {
             if trackTime is missing value then set trackTime to ""
             set isRadio to false
         \(radioBlock)
-            return (player state as string) & "\(sep)" & trackName & "\(sep)" & trackArtist & "\(sep)" & trackAlbum & "\(sep)" & trackDuration & "\(sep)" & playerPos & "\(sep)" & streamName & "\(sep)" & trackTime & "\(sep)" & (isRadio as string)
+            set shuffleState to "false"
+            set repeatState to "off"
+            try
+                set shuffleState to (\(shuffleExpr)) as string
+            end try
+            try
+                set repeatState to (\(repeatExpr)) as string
+            end try
+            return (player state as string) & "\(sep)" & trackName & "\(sep)" & trackArtist & "\(sep)" & trackAlbum & "\(sep)" & trackDuration & "\(sep)" & playerPos & "\(sep)" & streamName & "\(sep)" & trackTime & "\(sep)" & (isRadio as string) & "\(sep)" & shuffleState & "\(sep)" & repeatState
         end tell
         """
         guard let output = execute(script)?.stringValue, !output.isEmpty else { return nil }
@@ -413,6 +612,15 @@ final class NowPlayingService: ObservableObject {
     }
 
     // MARK: - Parsing
+
+    /// Music says off / one / all; Spotify says true / false.
+    private static func repeatMode(_ value: String) -> TrackInfo.RepeatMode {
+        switch value.trimmingCharacters(in: .whitespaces) {
+        case "one": return .one
+        case "all", "true": return .all
+        default: return .off
+        }
+    }
 
     /// Parses "m:ss" or "h:mm:ss".
     private static func clockSeconds(_ string: String) -> Double {

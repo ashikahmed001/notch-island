@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notch Island Privacy Policy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Geist:wght@400..600&family=Geist+Mono:wght@400..500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="wrap topbar">
+  <a class="brand" href="index.html">
+    <svg viewBox="0 0 1024 1024" aria-hidden="true"><rect x="100" y="100" width="824" height="824" rx="185" fill="#0b0b0b"/><g transform="translate(100 100) scale(4.478) translate(-8 -8)" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path d="M52 62 H148 M66 62 V70 Q66 92 88 92 H112 Q134 92 134 70 V62" stroke-width="7"/><path d="M76 128 H124" stroke-width="7" stroke-opacity="0.35"/></g></svg>
+    Notch Island
+  </a>
+  <nav aria-label="Site">
+    <a href="index.html#features">Features</a>
+    <a href="index.html#pricing">Pricing</a>
+    <a href="changelog.html">Changelog</a>
+  </nav>
+</header>
+<main class="doc">
+<h1>Privacy</h1>
+<p class="updated">Last updated 1 November 2026</p>
+<p>Notch Island is a Mac app that runs on your computer. It has no account, no analytics and no advertising, and it doesn't send what it sees on your Mac to us or anyone else.</p>
+
+<h2>What stays on your Mac</h2>
+<p>To show things in the notch, the app reads information on your Mac, only for the features you turn on:</p>
+<ul>
+  <li>What's playing in Music, Spotify and supported browsers, and your audio outputs.</li>
+  <li>Your calendar events and reminders, if you allow access.</li>
+  <li>Your recent clipboard items, files you drop on the island, new screenshots and downloads.</li>
+  <li>Battery level, connected headphones, CPU load and network status.</li>
+  <li>Which apps are using your microphone or camera. The app never records audio or video.</li>
+  <li>Messages from your own scripts and AI coding tools sent to the local Island API.</li>
+</ul>
+<p>This information is kept in memory or in the app's own files on your Mac (for example clipboard history and settings) and is deleted when you remove the app and its data.</p>
+
+<h2>What goes over the internet</h2>
+<ul>
+  <li><strong>Album artwork lookup (optional).</strong> When a song has no artwork, the app can ask Apple's public iTunes Search service for it, sending the song's title and artist. You can turn this off in Settings ▸ Music.</li>
+  <li><strong>Update checks.</strong> Once a day the app downloads the list of available versions from this website (hosted on GitHub Pages). It sends nothing about you; like any web request, GitHub sees your IP address. You can turn this off in Settings ▸ General.</li>
+</ul>
+
+<h2>The Island API</h2>
+<p>The API that lets scripts talk to the app only listens on your own Mac (127.0.0.1), requires a secret token stored in your home folder, and rejects requests from web pages.</p>
+
+<h2>Contact</h2>
+<p>Questions about privacy: <a href="https://github.com/ashikahmed001/notchisland/issues">GitHub Issues</a>.</p>
+</main>
+<footer class="footer">
+  <div class="wrap">
+    <span>© 2026 Ashik Ahmed. Notch Island is not affiliated with Apple.</span>
+    <nav aria-label="Legal">
+      <a href="changelog.html">Changelog</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+      <a href="https://github.com/ashikahmed001/notchisland/issues">Feedback &amp; support</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>
