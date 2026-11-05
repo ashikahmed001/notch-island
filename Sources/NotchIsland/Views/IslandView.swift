@@ -163,6 +163,10 @@ struct ActivityBubble: View {
             }
         case .privacy:
             PrivacyDots(privacy: vm.privacy)
+        case .terminalInput:
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.yellow)
         case .system:
             if let activity = vm.systemActivity {
                 ProgressRing(fraction: activity.fraction, tint: activity.kind == .backup ? .green : .blue)

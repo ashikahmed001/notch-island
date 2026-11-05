@@ -269,3 +269,11 @@
 "Same time as you" = "आपके जैसा ही समय";
 "%@ ahead of you" = "आपसे %@ आगे";
 "%@ behind you" = "आपसे %@ पीछे";
+
+"Show the date in the open island" = "खुले आइलैंड में तारीख दिखाएँ";
+"Show the battery in the open island" = "खुले आइलैंड में बैटरी दिखाएँ";
+
+"Alert when a command needs your input" = "जब कोई कमांड आपके इनपुट का इंतज़ार करे तो बताएँ";
+"A password, a [y/N] or a question, while that terminal isn't in front. Click to go to it." = "पासवर्ड, [y/N] या कोई सवाल, जब वह टर्मिनल सामने न हो। वहाँ जाने के लिए क्लिक करें।";
+"Needs your input · %@" = "आपके इनपुट की ज़रूरत · %@";
+"Input" = "इनपुट";

@@ -269,3 +269,11 @@
 "Same time as you" = "あなたと同じ時刻";
 "%@ ahead of you" = "あなたより %@ 進んでいます";
 "%@ behind you" = "あなたより %@ 遅れています";
+
+"Show the date in the open island" = "開いたアイランドに日付を表示";
+"Show the battery in the open island" = "開いたアイランドにバッテリーを表示";
+
+"Alert when a command needs your input" = "コマンドが入力を待っているときに通知";
+"A password, a [y/N] or a question, while that terminal isn't in front. Click to go to it." = "パスワード、[y/N]、質問など（そのターミナルが前面にないとき）。クリックで移動。";
+"Needs your input · %@" = "入力待ち · %@";
+"Input" = "入力";

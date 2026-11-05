@@ -213,6 +213,8 @@ struct CompactView: View {
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.orange)
                 }
+            } else if let item = vm.waitingCommand {
+                CompactWaitingCommand(item: item, notchWidth: vm.notchSize.width)
             } else if vm.showsTimerActivity {
                 TimerRing(timer: vm.timer, lineWidth: 2.5)
                     .frame(width: 16, height: 16)
@@ -241,7 +243,14 @@ struct CompactView: View {
                     .lineLimit(1)
                     .frame(maxWidth: 70, alignment: .trailing)
             } else if vm.showsAgentActivity, let session = vm.latestAgent {
-                AgentIcon(session: session, size: 18)
+                HStack(spacing: 7) {
+                    AgentIcon(session: session, size: 18)
+                    Text(session.displayName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .lineLimit(1)
+                }
+                .fixedSize()
                 Spacer(minLength: vm.notchSize.width)
                 if session.state == .needsInput {
                     Image(systemName: "hand.raised.fill")
@@ -251,7 +260,8 @@ struct CompactView: View {
                     HStack(spacing: 6) {
                         Spinner(tint: IslandAPIService.swiftUIColor(session.tint))
                             .frame(width: 12, height: 12)
-                        if let started = session.currentStarted {
+                        // The whole task's time (each step restarting the clock looked like a reset).
+                        if session.state == .working, case let started = session.started {
                             TimelineView(.periodic(from: started, by: 1)) { context in
                                 Text(AgentSession.elapsed(since: started, now: context.date))
                                     // Monospaced like a terminal clock (matches the website).
@@ -266,9 +276,18 @@ struct CompactView: View {
             } else if vm.showsPrivacyActivity {
                 CompactPrivacy(privacy: vm.privacy, notchWidth: vm.notchSize.width)
             } else if let meeting = vm.compactJoinMeeting {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color(nsColor: meeting.color))
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color(nsColor: meeting.color))
+                    TimelineView(.everyMinute) { _ in
+                        Text(vm.compactJoinLabel ?? meeting.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.white)
+                            .lineLimit(1)
+                    }
+                }
+                .fixedSize()
                 Spacer(minLength: vm.notchSize.width)
                 JoinButton(height: 22) { vm.joinFromCompact() }
                     .help("Join “\(meeting.title)”")
@@ -715,7 +734,7 @@ struct DownloadBanner: View {
                 .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(download?.browserName.map { "Downloading · \($0)" } ?? (download == nil ? "Download" : "Downloading"))
+                Text(download?.browserName.map { "Downloading from \($0)" } ?? (download == nil ? "Download" : "Downloading"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1000,5 +1019,36 @@ struct PrivacyDots: View {
         }
         if privacy.cameraInUse { parts.append(String(localized: "Camera in use")) }
         return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Terminal waiting for input
+
+/// The terminal's icon with a ✋ on the left, "Needs input" on the right. Click to go there.
+struct CompactWaitingCommand: View {
+    let item: TerminalInputWatcher.Waiting
+    let notchWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Group {
+                if let icon = item.icon {
+                    Image(nsImage: icon).resizable().interpolation(.high)
+                } else {
+                    Image(systemName: "terminal").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.white)
+                }
+            }
+            .frame(width: 18, height: 18)
+            .help("“\(item.command)” is waiting for your input — click to go there")
+            Spacer(minLength: notchWidth)
+            HStack(spacing: 5) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Input")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(Color.yellow)
+            .fixedSize()
+        }
     }
 }

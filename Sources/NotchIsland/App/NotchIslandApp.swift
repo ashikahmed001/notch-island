@@ -46,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var permissionsModel = PermissionsModel(calendarService: calendar, reminderService: reminders)
     private static let launchedBeforeKey = "hasLaunchedBefore"
     private static let greetedBootKey = "greetedBootTime"
+    /// Which copy of the app last ran (path + file number) and its build: a reinstall or an
+    /// update makes a new copy, even though macOS keeps the preferences when an app is deleted.
+    private static let installKey = "installFingerprint"
+    private static let installBuildKey = "installBuild"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         LiquidGlass.flags = flags
@@ -104,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         api.isEnabled = flags.isOn(.islandAPI)
         api.terminalAlertsEnabled = flags.isOn(.terminalAlerts)
         api.onlyWhenTerminalInBackground = flags.isOn(.terminalOnlyInBackground)
+        TerminalInputWatcher.shared.isEnabled = flags.isOn(.terminalInputAlerts)
         claudeWatcher.isEnabled = flags.isOn(.claudeAppActivity) && !lock.isLocked
         if !flags.isOn(.timer) { timer.stop() }
 
@@ -136,6 +141,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Say hello first (only on the first launch after the Mac starts up),
     /// then start the services so permission prompts come after the greeting.
+    /// "/Applications/Notch Island.app#12345678" for an installed copy; nil for development
+    /// builds (anywhere outside an Applications folder).
+    private static func installFingerprint() -> String? {
+        let path = Bundle.main.bundleURL.path
+        guard path.hasPrefix("/Applications/") || path.contains("/Applications/") else { return nil }
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        return "\(path)#\(info.st_ino)"
+    }
+
     private func greetThenStart() {
         let start = { [weak self] in
             guard let self else { return }
@@ -143,13 +158,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.applyFlags()
         }
         let defaults = UserDefaults.standard
-        let firstRun = !defaults.bool(forKey: Self.launchedBeforeKey)
+        let launchedBefore = defaults.bool(forKey: Self.launchedBeforeKey)
         defaults.set(true, forKey: Self.launchedBeforeKey)
+
+        // A fresh copy in Applications: reinstalled (same build) or updated (new build).
+        // Development builds in build/ are rebuilt constantly, so they don't count.
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        let fingerprint = Self.installFingerprint()
+        let installChanged = fingerprint != nil && defaults.string(forKey: Self.installKey) != fingerprint
+        let previousBuild = defaults.string(forKey: Self.installBuildKey)
+        if let fingerprint { defaults.set(fingerprint, forKey: Self.installKey) }
+        defaults.set(build, forKey: Self.installBuildKey)
+        let reinstalled = launchedBefore && installChanged && previousBuild == build
+        let updated = launchedBefore && installChanged && previousBuild != nil && previousBuild != build
+        if reinstalled || updated {
+            Log.island.notice("\(reinstalled ? "reinstalled" : "updated", privacy: .public) — showing the welcome again")
+        }
+        // A reinstall gets the full first-run welcome (and the permissions check).
+        let firstRun = !launchedBefore || reinstalled
 
         // Same boot as last greeting → the app was just relaunched; stay quiet.
         let boot = Self.bootTime().map { $0.timeIntervalSince1970.rounded() }
         let greetedBoot = defaults.object(forKey: Self.greetedBootKey) as? Double
-        let freshBoot = boot == nil || boot != greetedBoot
+        let freshBoot = boot == nil || boot != greetedBoot || updated
         if let boot { defaults.set(boot, forKey: Self.greetedBootKey) }
 
         guard flags.isOn(.welcomeGreeting), firstRun || freshBoot, let controller = controllers.first else {

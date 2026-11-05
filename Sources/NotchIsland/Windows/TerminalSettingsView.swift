@@ -24,6 +24,14 @@ struct TerminalSettingsView: View {
                 Toggle(Feature.terminalAlerts.title, isOn: Binding(
                     get: { flags.storedValue(.terminalAlerts) }, set: { flags.set(.terminalAlerts, $0) }))
                     .disabled(!flags.isOn(.islandAPI))
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle(Feature.terminalInputAlerts.title, isOn: Binding(
+                        get: { flags.storedValue(.terminalInputAlerts) }, set: { flags.set(.terminalInputAlerts, $0) }))
+                    if let subtitle = Feature.terminalInputAlerts.subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!flags.isOn(.islandAPI))
             }
             Section("Island API") {
                 HStack(spacing: 8) {

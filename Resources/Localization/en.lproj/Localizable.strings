@@ -269,3 +269,11 @@
 "Same time as you" = "Same time as you";
 "%@ ahead of you" = "%@ ahead of you";
 "%@ behind you" = "%@ behind you";
+
+"Show the date in the open island" = "Show the date in the open island";
+"Show the battery in the open island" = "Show the battery in the open island";
+
+"Alert when a command needs your input" = "Alert when a command needs your input";
+"A password, a [y/N] or a question, while that terminal isn't in front. Click to go to it." = "A password, a [y/N] or a question, while that terminal isn't in front. Click to go to it.";
+"Needs your input · %@" = "Needs your input · %@";
+"Input" = "Input";

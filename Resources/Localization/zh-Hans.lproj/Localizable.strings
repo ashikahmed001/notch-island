@@ -269,3 +269,11 @@
 "Same time as you" = "与你时间相同";
 "%@ ahead of you" = "比你快 %@";
 "%@ behind you" = "比你慢 %@";
+
+"Show the date in the open island" = "在展开的灵动岛中显示日期";
+"Show the battery in the open island" = "在展开的灵动岛中显示电池";
+
+"Alert when a command needs your input" = "命令等待输入时提醒";
+"A password, a [y/N] or a question, while that terminal isn't in front. Click to go to it." = "密码、[y/N] 或提问（该终端不在前台时）。点按即可前往。";
+"Needs your input · %@" = "需要你的输入 · %@";
+"Input" = "输入";

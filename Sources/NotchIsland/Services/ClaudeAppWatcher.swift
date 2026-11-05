@@ -273,12 +273,24 @@ final class ClaudeAppWatcher {
     }
 
     /// "Running a command on your computer" → kept; chat text and past steps → nil.
+    ///
+    /// Chat text can look like a status ("Uploading build" inside a code sample), so only
+    /// plain, short, sentence-like lines count: they start with a capitalised verb, and
+    /// contain no quotes or code characters.
+    private static let codeCharacters = CharacterSet(charactersIn: "\"'`“”‘’$=/\\<>{}[]|_#*%")
+
     private static func statusLine(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (4...100).contains(trimmed.count), !trimmed.contains("\n"),
-              let first = trimmed.split(separator: " ").first else { return nil }
+        guard (4...80).contains(trimmed.count), !trimmed.contains("\n"),
+              trimmed.rangeOfCharacter(from: codeCharacters) == nil,
+              let first = trimmed.split(separator: " ").first,
+              let initial = first.first, initial.isUppercase else { return nil }
         let verb = first.lowercased().trimmingCharacters(in: .punctuationCharacters)
         guard statusVerbs.contains(verb) else { return nil }
+        // Live statuses are short ("Running a command…"); longer lines are prose.
+        let words = trimmed.split(separator: " ").count
+        let endsWithEllipsis = trimmed.hasSuffix("…") || trimmed.hasSuffix("...")
+        guard endsWithEllipsis || words <= 7 else { return nil }
         return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "…. "))
     }
 

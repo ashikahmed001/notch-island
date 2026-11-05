@@ -269,3 +269,11 @@
 "Same time as you" = "Misma hora que tú";
 "%@ ahead of you" = "%@ por delante";
 "%@ behind you" = "%@ por detrás";
+
+"Show the date in the open island" = "Mostrar la fecha en la isla abierta";
+"Show the battery in the open island" = "Mostrar la batería en la isla abierta";
+
+"Alert when a command needs your input" = "Avisar cuando un comando necesite tu respuesta";
+"A password, a [y/N] or a question, while that terminal isn't in front. Click to go to it." = "Una contraseña, un [y/N] o una pregunta, mientras esa terminal no está delante. Haz clic para ir a ella.";
+"Needs your input · %@" = "Necesita tu respuesta · %@";
+"Input" = "Entrada";

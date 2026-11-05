@@ -29,6 +29,7 @@ enum Feature: String, CaseIterable {
     case screenshotShelf
     case terminalAlerts
     case terminalOnlyInBackground
+    case terminalInputAlerts
     case claudeAppActivity
     case clickToPaste
     case timerAlert
@@ -54,11 +55,13 @@ enum Feature: String, CaseIterable {
     case networkAlerts
     case liveBanners
     case deviceAlerts
+    case headerDate
+    case headerBattery
 
     /// Features shown as main toggles, in menu order.
     static let features: [Feature] = [.homeDashboard, .nowPlaying, .calendar, .reminders, .clipboard, .timer, .battery, .downloads, .islandAPI, .lockUnlock, .privacy, .systemEvents, .commandBar]
     /// App-wide toggles that don't belong to a feature.
-    static let general: [Feature] = [.openAtLogin, .welcomeGreeting, .splitIsland, .liveBanners, .deviceAlerts, .networkAlerts, .liquidGlass, .batterySaver, .hoverHaptics]
+    static let general: [Feature] = [.openAtLogin, .welcomeGreeting, .splitIsland, .liveBanners, .deviceAlerts, .networkAlerts, .headerDate, .headerBattery, .liquidGlass, .batterySaver, .hoverHaptics]
 
     var title: String {
         switch self {
@@ -90,6 +93,7 @@ enum Feature: String, CaseIterable {
         case .screenshotShelf: return String(localized: "Screenshot shelf")
         case .terminalAlerts: return String(localized: "Long-running command alerts")
         case .terminalOnlyInBackground: return String(localized: "Only when the terminal isn't in front")
+        case .terminalInputAlerts: return String(localized: "Alert when a command needs your input")
         case .claudeAppActivity: return String(localized: "Claude app activity (experimental)")
         case .timerAlert: return String(localized: "Open & shake when done")
         case .timerSound: return String(localized: "Chime when done")
@@ -107,6 +111,8 @@ enum Feature: String, CaseIterable {
         case .networkAlerts: return String(localized: "Internet connection alerts")
         case .liveBanners: return String(localized: "Pop down when something starts")
         case .deviceAlerts: return String(localized: "Headphones connected (with battery)")
+        case .headerDate: return String(localized: "Show the date in the open island")
+        case .headerBattery: return String(localized: "Show the battery in the open island")
         }
     }
 
@@ -124,6 +130,7 @@ enum Feature: String, CaseIterable {
         case .downloads: return String(localized: "Progress while a browser downloads a file")
         case .islandAPI: return String(localized: "Alerts from scripts, Terminal, Shortcuts and AI agents")
         case .claudeAppActivity: return String(localized: "Reads the Claude app's status line through Accessibility")
+        case .terminalInputAlerts: return String(localized: "A password, a [y/N] or a question, while that terminal isn't in front. Click to go to it.")
         case .lockUnlock: return String(localized: "Unlock animation and what you missed")
         case .privacy: return String(localized: "See which app is using your microphone or camera")
         case .systemEvents: return String(localized: "Time Machine and copy progress, and when a drive is safe to unplug")
@@ -163,7 +170,7 @@ enum Feature: String, CaseIterable {
         case .musicInCompact, .artworkLookup, .browserMedia: return .nowPlaying
         case .meetingInCompact, .newMeetingAlerts: return .calendar
         case .copyPreview, .clickToPaste, .screenshotShelf: return .clipboard
-        case .terminalAlerts, .terminalOnlyInBackground, .claudeAppActivity: return .islandAPI
+        case .terminalAlerts, .terminalOnlyInBackground, .terminalInputAlerts, .claudeAppActivity: return .islandAPI
         case .timerAlert, .timerSound: return .timer
         case .chargingAlerts, .lowBatteryAlerts: return .battery
         case .unlockAnimation, .awaySummary, .pauseWhileLocked: return .lockUnlock
@@ -182,6 +189,7 @@ enum Feature: String, CaseIterable {
         case .openAtLogin: return false   // never register a login item without asking
         case .terminalOnlyInBackground: return false
         case .claudeAppActivity: return false   // experimental: reads the Claude app's window
+        case .headerDate, .headerBattery: return false   // the menu bar already shows both
         default: return true
         }
     }

@@ -53,6 +53,8 @@ final class IslandViewModel: ObservableObject {
         var finished = false
         /// Content that keeps updating while the banner shows.
         var live: Live? = nil
+        /// Clicking the banner does this (e.g. bring the agent's window forward).
+        var onTap: (() -> Void)? = nil
 
         enum Live { case download }
 
@@ -222,6 +224,7 @@ final class IslandViewModel: ObservableObject {
     let downloads: DownloadsService
     let privacy = PrivacyService.shared
     let systemProgress = SystemProgressService.shared
+    let terminalInput = TerminalInputWatcher.shared
     let api: IslandAPIService
     let flags: FeatureFlags
 
@@ -283,6 +286,7 @@ final class IslandViewModel: ObservableObject {
                           api.objectWillChange.eraseToAnyPublisher(),
                           privacy.objectWillChange.eraseToAnyPublisher(),
                           systemProgress.objectWillChange.eraseToAnyPublisher(),
+                          terminalInput.objectWillChange.eraseToAnyPublisher(),
                           flags.objectWillChange.eraseToAnyPublisher()] {
             publisher
                 .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -415,6 +419,20 @@ final class IslandViewModel: ObservableObject {
                                            title: self.network.connectionName, trailing: .check(.green),
                                            duration: 2.5), always: true)
                 }
+            }
+            .store(in: &cancellables)
+
+        // A terminal command is waiting for your input.
+        terminalInput.startedWaiting
+            .receive(on: RunLoop.main)
+            .sink { [weak self] item in
+                guard let self, self.flags.isOn(.terminalInputAlerts), !self.lock.isLocked else { return }
+                self.showBanner(Banner(icon: .image(item.icon, fallback: "terminal"),
+                                       badge: Banner.Badge(symbol: "hand.raised.fill", color: .yellow),
+                                       caption: String(localized: "Needs your input · \(item.appName)"),
+                                       title: item.command,
+                                       trailing: .symbol("hand.raised.fill", .yellow), duration: 6,
+                                       onTap: { [weak self] in self?.terminalInput.open(item) }), always: true)
             }
             .store(in: &cancellables)
 
@@ -676,11 +694,12 @@ final class IslandViewModel: ObservableObject {
 
     /// Ongoing activities that can live in the collapsed island, most important first.
     enum LiveActivity: String {
-        case timer, download, system, apiProgress, agent, privacy, meeting, music
+        case terminalInput, timer, download, system, apiProgress, agent, privacy, meeting, music
     }
 
     var liveActivities: [LiveActivity] {
         var list: [LiveActivity] = []
+        if waitingCommand != nil { list.append(.terminalInput) }
         if showsTimerActivity { list.append(.timer) }
         if showsDownloadActivity { list.append(.download) }
         if systemActivity != nil { list.append(.system) }
@@ -723,11 +742,13 @@ final class IslandViewModel: ObservableObject {
         case .agent: return .agents
         case .privacy: return nil
         case .system: return nil
+        case .terminalInput: return nil
         }
     }
 
     var compactKey: String {
         if let peek { return "peek-\(peek)" }
+        if waitingCommand != nil { return "terminal-input" }
         if showsTimerActivity { return "timer" }
         if showsDownloadActivity { return "download" }
         if systemActivity != nil { return "system" }
@@ -840,10 +861,15 @@ final class IslandViewModel: ObservableObject {
             // Both ears grow together so the island stays centred on the camera.
             let ear = batteryPeekEar ?? peekEarText.map { Self.textWidth($0) + Self.earInset } ?? 0
             width += max(130, 2 * ear)
-        } else if compactJoinMeeting != nil {
-            width += 150    // room for the Join button beside the camera
-        } else if liveActivities.first == .agent, latestAgent?.currentStarted != nil {
-            width += 140    // spinner + "1m 05s" beside the camera
+        } else if let label = compactJoinLabel {
+            // "📅 Standup · in 2m" on the left, Join on the right; both ears grow together.
+            let left = 15 + 6 + min(150, Self.textWidth(label))
+            width += 2 * (max(left, 56) + Self.earInset)
+        } else if liveActivities.first == .agent, let session = latestAgent {
+            // Icon + "Claude" on the left, spinner + "1m 05s" (or ✋) on the right.
+            let left = 18 + 7 + Self.textWidth(session.displayName)
+            let right: CGFloat = session.state == .working ? 12 + 6 + 62 : 16
+            width += 2 * (max(left, right) + Self.earInset)
         } else if !liveActivities.isEmpty {
             width += 84
         }
@@ -904,6 +930,19 @@ final class IslandViewModel: ObservableObject {
     var latestAgent: AgentSession? { api.agentSessions.first }
 
     /// An AI agent is working (or waiting for you) in a terminal.
+    /// A terminal command waiting for you to type something.
+    var waitingCommand: TerminalInputWatcher.Waiting? {
+        guard flags.isOn(.terminalInputAlerts) else { return nil }
+        return terminalInput.waiting.first
+    }
+
+    /// Go to the terminal that's waiting (its exact tab in Terminal and iTerm).
+    func openWaitingCommand() {
+        guard let item = waitingCommand else { return }
+        terminalInput.open(item)
+        collapseHandler?()
+    }
+
     /// A Time Machine backup or a copy onto a drive (whichever is switched on; copies first).
     var systemActivity: SystemProgressService.Activity? {
         guard flags.isOn(.systemEvents) else { return nil }
@@ -943,6 +982,14 @@ final class IslandViewModel: ObservableObject {
     }
 
     // MARK: - One-click Join
+
+    /// "Standup · in 2m" beside the meeting icon (title shortened to fit).
+    var compactJoinLabel: String? {
+        guard let meeting = compactJoinMeeting else { return nil }
+        let title = meeting.title.count > 16 ? String(meeting.title.prefix(15)) + "…" : meeting.title
+        let when = meeting.shortLabel(at: Date())
+        return when == "Now" ? "\(title) · now" : "\(title) · in \(when)"
+    }
 
     /// The collapsed island is showing a meeting with a video link → a Join button.
     var compactJoinMeeting: Meeting? {
@@ -1102,13 +1149,15 @@ final class IslandViewModel: ObservableObject {
                                            badge: .init(symbol: "hand.raised.fill", color: .yellow),
                                            title: "\(session.displayName) needs your input",
                                            subtitle: session.message ?? session.project,
-                                           trailing: .symbol("hand.raised.fill", .yellow), duration: 8), always: true)
+                                           trailing: .symbol("hand.raised.fill", .yellow), duration: 8,
+                                           onTap: { session.openHost() }), always: true)
                 case .finished(let session):
                     self.showBanner(Banner(icon: .image(session.icon, fallback: "sparkles"),
                                            badge: .init(symbol: "checkmark", color: .green),
                                            title: "\(session.displayName) finished",
                                            subtitle: session.finishedLine ?? session.project,
-                                           trailing: .check(.green), duration: 6, finished: true), always: true)
+                                           trailing: .check(.green), duration: 6, finished: true,
+                                           onTap: { session.openHost() }), always: true)
                 }
             }
             .store(in: &cancellables)
@@ -1359,7 +1408,9 @@ final class IslandViewModel: ObservableObject {
 
     /// Collapsed island takes clicks while this shows (instead of opening on hover).
     var isClickablePeek: Bool {
-        (peek == .notice || peek == .copied || peek == .alert || (peek == .downloaded && lastDownload != nil)) && mode == .collapsed
+        (peek == .notice || peek == .copied || peek == .alert || (peek == .downloaded && lastDownload != nil)
+            || (peek == .banner && banner?.onTap != nil)
+            || (peek == nil && liveActivities.first == .terminalInput)) && mode == .collapsed
     }
 
     // MARK: - Alerts
@@ -1414,6 +1465,14 @@ final class IslandViewModel: ObservableObject {
     func dismissAlert() {
         guard peek == .alert else { return }
         endPeek()
+        collapseHandler?()
+    }
+
+    // MARK: - Agents
+
+    /// Bring the agent's window forward and tuck the island away.
+    func openAgent(_ session: AgentSession) {
+        session.openHost()
         collapseHandler?()
     }
 
@@ -1535,6 +1594,16 @@ final class IslandViewModel: ObservableObject {
 
     /// Click: open the meeting in Calendar / the reminder in Reminders.
     func openNotice() {
+        if peek == nil, liveActivities.first == .terminalInput {
+            openWaitingCommand()
+            return
+        }
+        if peek == .banner, let tap = banner?.onTap {
+            tap()
+            endPeek()
+            collapseHandler?()
+            return
+        }
         guard peek == .notice, let notice else { return }
         switch notice.kind {
         case .newMeeting(let meeting): calendar.open(meeting)

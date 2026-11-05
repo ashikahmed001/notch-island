@@ -30,6 +30,8 @@ struct AgentSession: Identifiable, Equatable {
     /// The app the agent runs in (Terminal, iTerm, VS Code…) — for the icon and "Open".
     var hostBundleID: String?
     var updated = Date()
+    /// When this task began (the prompt): the island's clock counts the whole task.
+    var started = Date()
 
     /// "Claude", "Copilot"…
     var displayName: String {
@@ -69,64 +71,14 @@ struct AgentSession: Identifiable, Equatable {
 
     /// Bring the terminal / editor / Claude app running the agent to the front, with its
     /// window restored if it was minimized.
-    ///
-    /// `NSRunningApplication.activate()` is ignored on macOS 14+ when the caller isn't the
-    /// active app (and Notch Island never is), so open it through Launch Services instead —
-    /// that always brings a running app forward.
     func openHost() {
         guard let id = hostBundleIDs.first(where: { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty })
-                ?? hostBundleIDs.first,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, _ in
-            guard let app else { return }
-            DispatchQueue.main.async { Self.restoreWindows(of: app) }
-        }
+                ?? hostBundleIDs.first else { return }
+        HostWindow.open(bundleID: id)
     }
 
-    /// Un-minimize the app's windows and raise the first one (needs Accessibility; harmless without).
-    private static func restoreWindows(of app: NSRunningApplication) {
-        guard AXIsProcessTrusted() else { return }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(element, 0.3)
-        var value: AnyObject?
-        guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return }
-        var raised = false
-        for window in windows {
-            var minimized: AnyObject?
-            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized) == .success,
-               (minimized as? Bool) == true {
-                AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-                if !raised {
-                    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                    raised = true
-                }
-            }
-        }
-    }
-
-    /// The agent's window is what you're looking at: its app is in front and the window
-    /// isn't minimized. Then the island stays quiet about it.
-    var isHostInFront: Bool {
-        guard let front = NSWorkspace.shared.frontmostApplication,
-              let id = front.bundleIdentifier, hostBundleIDs.contains(id) else { return false }
-        // In front but with its window minimized or closed → you can't see it.
-        guard AXIsProcessTrusted() else { return true }
-        let element = AXUIElementCreateApplication(front.processIdentifier)
-        AXUIElementSetMessagingTimeout(element, 0.2)
-        var value: AnyObject?
-        guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value) == .success,
-              let raw = value, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return false }
-        let window = raw as! AXUIElement
-        var minimized: AnyObject?
-        if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized) == .success,
-           (minimized as? Bool) == true {
-            return false
-        }
-        return true
-    }
+    /// The agent's window is what you're looking at (then the island stays quiet about it).
+    var isHostInFront: Bool { HostWindow.isInFront(hostBundleIDs) }
 
     /// "Refactored the notch geometry · 3 files"
     var finishedLine: String? {
@@ -198,6 +150,44 @@ struct AgentSession: Identifiable, Equatable {
         return IslandAPIService.clean(sentence, max: max) ?? ""
     }
 
+    enum TurnState { case running, finished, interrupted }
+
+    /// Whether Claude Code's turn is over, from the end of its transcript — for when the
+    /// "Stop" hook never comes (Esc pressed, a step cancelled or rejected).
+    ///   - the last message is "[Request interrupted by user…]" → interrupted;
+    ///   - the last message is Claude's reply with no tool call pending, and the transcript
+    ///     has been quiet for `quietFor` seconds → finished.
+    /// A long-running tool (a build) leaves a pending tool call, so it stays "running".
+    static func turnState(transcript path: String, quietFor: TimeInterval = 20) -> TurnState {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
+        let claudeFolder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude").standardizedFileURL.path
+        guard url.path.hasPrefix(claudeFolder + "/"),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let modified = attributes[.modificationDate] as? Date,
+              let handle = try? FileHandle(forReadingFrom: url) else { return .running }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let chunk: UInt64 = 64 * 1024
+        try? handle.seek(toOffset: size > chunk ? size - chunk : 0)
+        guard let data = try? handle.readToEnd(), let text = String(data: data, encoding: .utf8) else { return .running }
+
+        for line in text.split(separator: "\n").reversed() {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let type = object["type"] as? String, type == "user" || type == "assistant",
+                  let message = object["message"] as? [String: Any] else { continue }
+            let content = message["content"] as? [[String: Any]] ?? []
+            let texts = content.compactMap { $0["text"] as? String } + [message["content"] as? String].compactMap { $0 }
+            if type == "user" {
+                if texts.contains(where: { $0.contains("[Request interrupted by user") }) { return .interrupted }
+                return .running   // a tool result or a new prompt: Claude is about to answer
+            }
+            let pendingTool = content.contains { $0["type"] as? String == "tool_use" }
+            if pendingTool { return .running }
+            return Date().timeIntervalSince(modified) >= quietFor ? .finished : .running
+        }
+        return .running
+    }
+
     /// The last thing Claude said, from the end of its transcript (JSON lines).
     static func lastAssistantText(transcript path: String) -> String? {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
@@ -229,5 +219,65 @@ extension IslandAPIService {
         case started(AgentSession)
         case needsInput(AgentSession)
         case finished(AgentSession)
+    }
+}
+
+/// The app window something is happening in (a terminal, an editor, the Claude app).
+enum HostWindow {
+    /// Bring the app to the front, with its windows un-minimized.
+    ///
+    /// `NSRunningApplication.activate()` is ignored on macOS 14+ when the caller isn't the
+    /// active app (and Notch Island never is), so open it through Launch Services instead —
+    /// that always brings a running app forward.
+    static func open(bundleID: String) {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { app, _ in
+            guard let app else { return }
+            DispatchQueue.main.async { restoreWindows(of: app) }
+        }
+    }
+
+    /// Un-minimize the app's windows and raise the first one (needs Accessibility; harmless without).
+    private static func restoreWindows(of app: NSRunningApplication) {
+        guard AXIsProcessTrusted() else { return }
+        let element = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.3)
+        var value: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement] else { return }
+        var raised = false
+        for window in windows {
+            var minimized: AnyObject?
+            if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized) == .success,
+               (minimized as? Bool) == true {
+                AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+                if !raised {
+                    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                    raised = true
+                }
+            }
+        }
+    }
+
+    /// One of these apps is in front with a visible (not minimized) window.
+    static func isInFront(_ bundleIDs: [String]) -> Bool {
+        guard let front = NSWorkspace.shared.frontmostApplication,
+              let id = front.bundleIdentifier, bundleIDs.contains(id) else { return false }
+        // In front but with its window minimized or closed → you can't see it.
+        guard AXIsProcessTrusted() else { return true }
+        let element = AXUIElementCreateApplication(front.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.2)
+        var value: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value) == .success,
+              let raw = value, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return false }
+        let window = raw as! AXUIElement
+        var minimized: AnyObject?
+        if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized) == .success,
+           (minimized as? Bool) == true {
+            return false
+        }
+        return true
     }
 }

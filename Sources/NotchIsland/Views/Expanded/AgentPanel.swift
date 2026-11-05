@@ -20,6 +20,19 @@ struct AgentPanel: View {
                             .foregroundStyle(tint)
                             .lineLimit(1)
                         Spacer(minLength: 0)
+                        // No summary card (with its own Open) yet: offer Open up here.
+                        if session.hostBundleID != nil, (session.summary ?? session.message) == nil {
+                            Button { vm.openAgent(session) } label: {
+                                Label("Open", systemImage: "arrow.up.forward.app")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(Color.white)
+                                    .padding(.horizontal, 9)
+                                    .frame(height: 22)
+                                    .glassBackground(Capsule(), fallback: Color.white.opacity(0.12))
+                                    .contentShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
                         if api.agentSessions.count > 1 {
                             Text("+\(api.agentSessions.count - 1)")
                                 .font(.system(size: 10, weight: .semibold))
@@ -64,6 +77,10 @@ struct AgentPanel: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Click anywhere on the task to go to its window.
+                .contentShape(Rectangle())
+                .onTapGesture { if session.hostBundleID != nil { vm.openAgent(session) } }
+                .help(session.hostBundleID != nil ? "Click to open \(session.displayName)" : "")
 
                 if let text = session.summary ?? session.message {
                     summaryCard(session, text: text)
@@ -103,7 +120,7 @@ struct AgentPanel: View {
                 .lineLimit(5)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if session.hostBundleID != nil {
-                Button { session.openHost() } label: {
+                Button { vm.openAgent(session) } label: {
                     Label("Open", systemImage: "arrow.up.forward.app")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.white)

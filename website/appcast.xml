@@ -6,5 +6,23 @@
     <description>Updates for Notch Island.</description>
     <language>en</language>
     <!-- releases (newest first) -->
+    <item>
+      <title>Version 0.9.2</title>
+      <pubDate>Thu, 05 Nov 2026 03:52:40 +0000</pubDate>
+      <sparkle:version>4</sparkle:version>
+      <sparkle:shortVersionString>0.9.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>https://ashikahmed001.github.io/notchisland/changelog.html</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/ashikahmed001/notchisland/releases/download/v0.9.2/NotchIsland.dmg" type="application/octet-stream" sparkle:edSignature="HCbJvW1AkxNpMuMHCbl46I98N6X1gunW3Pdh0L3pC07dGJwy7Hpbp0gx9u48f5xApM012TDOWrU45LVeR6IiDg==" length="5343989"/>
+    </item>
+    <item>
+      <title>Version 0.9.1</title>
+      <pubDate>Thu, 05 Nov 2026 03:31:51 +0000</pubDate>
+      <sparkle:version>3</sparkle:version>
+      <sparkle:shortVersionString>0.9.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>https://ashikahmed001.github.io/notchisland/changelog.html</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/ashikahmed001/notchisland/releases/download/v0.9.1/NotchIsland.dmg" type="application/octet-stream" sparkle:edSignature="ePuxMpmnuwBCs8RfEQ//1UXk8FVKWjSvkOgE0cY8f0VmA1HQAOq6x7uiks/H54WH370Evh5WZJ+YYSdZC5DPBg==" length="5285942"/>
+    </item>
   </channel>
 </rss>

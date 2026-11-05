@@ -58,9 +58,11 @@ struct ExpandedView: View {
     private var ears: some View {
         HStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text(Date(), format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                if vm.flags.isOn(.headerDate) {
+                    Text(Date(), format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
                 if vm.visibleTab == .home {
                     HomeEditButton(vm: vm)
                 }
@@ -69,7 +71,7 @@ struct ExpandedView: View {
             Color.clear
                 .frame(width: vm.notchSize.width)
             Group {
-                if vm.showsBattery {
+                if vm.showsBattery && vm.flags.isOn(.headerBattery) {
                     BatteryBadge(battery: vm.battery, compact: true)
                         .font(.system(size: 11, weight: .medium))
                 }

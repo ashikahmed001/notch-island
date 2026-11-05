@@ -40,6 +40,14 @@ fail() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 UPDATES=1
 grep -q "REPLACE_WITH_SPARKLE_PUBLIC_KEY" Resources/Info.plist && UPDATES=0
 grep -q "sparkle-project\|Vendor/Sparkle" Package.swift || UPDATES=0
+if [[ $UPDATES == 1 && -x Vendor/Sparkle/bin/generate_keys ]]; then
+  # The public key in the app must match the private key in your Keychain, or no
+  # update would ever be accepted by users' Macs.
+  KEYCHAIN_PUB=$(Vendor/Sparkle/bin/generate_keys -p 2>/dev/null | tail -1 | tr -d '[:space:]')
+  PLIST_PUB=$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" Resources/Info.plist)
+  [[ -n $KEYCHAIN_PUB && $KEYCHAIN_PUB == "$PLIST_PUB" ]] \
+    || fail "SUPublicEDKey in Info.plist ($PLIST_PUB) doesn't match your Sparkle key ($KEYCHAIN_PUB)."
+fi
 security find-identity -v -p codesigning | grep -qF "$DEVELOPER_ID" \
   || fail "No signing identity named \"$DEVELOPER_ID\" in your keychain."
 if [[ $SKIP_NOTARIZE != 1 ]]; then

@@ -1,11 +1,12 @@
 # Shared by bundle.sh and release.sh. Source it; don't run it.
 
-# Copies Sparkle.framework from a SwiftPM build folder into the app and lets the
-# executable find it (Contents/Frameworks).
-#   embed_sparkle <app> <swiftpm bin dir>
+# Copies Sparkle.framework (from Vendor/Sparkle, or a SwiftPM build folder) into the app
+# and lets the executable find it (Contents/Frameworks).
+#   embed_sparkle <app> [swiftpm bin dir]
 embed_sparkle() {
-  local app=$1 bin_dir=$2
-  local framework="$bin_dir/Sparkle.framework"
+  local app=$1 bin_dir=${2:-}
+  local framework="Vendor/Sparkle/Sparkle.framework"
+  [[ -d $framework ]] || framework="$bin_dir/Sparkle.framework"
   if [[ ! -d $framework ]]; then
     return 0   # built without Sparkle (automatic updates off)
   fi
@@ -13,6 +14,7 @@ embed_sparkle() {
   rm -rf "$app/Contents/Frameworks/Sparkle.framework"
   # ditto keeps the framework's symlinks intact (cp -R can break code signatures).
   ditto "$framework" "$app/Contents/Frameworks/Sparkle.framework"
+  chmod -R u+rwX,go+rX "$app/Contents/Frameworks/Sparkle.framework"
   install_name_tool -add_rpath "@executable_path/../Frameworks" "$app/Contents/MacOS/NotchIsland" 2>/dev/null || true
 }
 
@@ -52,6 +54,7 @@ sign_app() {
 # Sparkle's command-line tools (sign_update, generate_keys) from the SwiftPM download.
 sparkle_tool() {
   local tool
+  if [[ -x Vendor/Sparkle/bin/$1 ]]; then echo "Vendor/Sparkle/bin/$1"; return; fi
   tool=$(find .build/artifacts -type f -path "*/bin/$1" 2>/dev/null | head -1)
   [[ -n $tool ]] && echo "$tool"
 }

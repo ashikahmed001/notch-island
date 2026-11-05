@@ -92,6 +92,8 @@ private struct GeneralSettings: View {
                 Toggle(Feature.liveBanners.title, isOn: binding(flags, .liveBanners))
                 Toggle(Feature.deviceAlerts.title, isOn: binding(flags, .deviceAlerts))
                 Toggle(Feature.networkAlerts.title, isOn: binding(flags, .networkAlerts))
+                Toggle(Feature.headerDate.title, isOn: binding(flags, .headerDate))
+                Toggle(Feature.headerBattery.title, isOn: binding(flags, .headerBattery))
                 Toggle(Feature.liquidGlass.title, isOn: binding(flags, .liquidGlass))
                     .disabled(!LiquidGlass.isSupported)
                 Text(LiquidGlass.isSupported

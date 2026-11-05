@@ -238,6 +238,23 @@ extension APIFiles {
     _notch_preexec() {
       _notch_cmd=$1
       _notch_start=$EPOCHREALTIME
+      # Tell the island which terminal this runs in, so it can say when the command
+      # waits for your input (a password, [y/N]…). Background, so nothing waits.
+      [[ $1 == ' '* ]] && return                                   # leading space = private
+      local program=${${(z)1}[1]}
+      (( ${NOTCH_IGNORE[(Ie)$program]} )) && return                # interactive tool
+      [[ -r ~/.notchisland/token && -n ${TTY:-} ]] || return
+      local cmd=${1[1,80]}
+      (( NOTCH_SHOW_COMMAND )) || cmd="A command"
+      {
+        curl --silent --max-time 1 \
+             -H "Authorization: Bearer $(<~/.notchisland/token)" \
+             --data-urlencode "cmd=$cmd" \
+             --data-urlencode "tty=$TTY" \
+             --data-urlencode "shell=$$" \
+             --data-urlencode "host=${__CFBundleIdentifier:-}" \
+             "${_NOTCH_URL%/command-finished}/command-started"
+      } &>/dev/null &!
     }
 
     # After each command, just before the prompt is drawn.

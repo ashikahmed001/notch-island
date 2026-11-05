@@ -25,7 +25,12 @@
     /* The iPhone feel: a little overshoot, then settle. */
     transition: width .62s cubic-bezier(.32,1.42,.48,1), height .62s cubic-bezier(.32,1.42,.48,1), border-radius .5s ease;
     box-shadow: 0 10px 30px -12px rgba(0,0,0,.45);
+    /* The real island uses Apple's system font (SF Pro / SF Mono). */
+    --island-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    --island-mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
+  .island .row .side, .island .banner .cap, .island .banner .title, .island .join { font-family: var(--island-font); }
+  .island .banner .trail, .island #elapsed { font-family: var(--island-mono) !important; }
   .island::before, .island::after { /* the little flares where it meets the top edge */
     content: ""; position: absolute; top: 0; width: 10px; height: 10px;
   }
@@ -284,7 +289,7 @@
       </div>
       <div class="price-card">
         <div class="amount">Free</div>
-        <p class="per">Version 0.9 public beta · macOS 13 or later · Apple silicon and Intel</p>
+        <p class="per">Version 0.9.1 public beta · macOS 13 or later · Apple silicon and Intel</p>
         <ul>
           <li>Every feature, switch on what you want</li>
           <li>Updates install themselves</li>
@@ -309,7 +314,7 @@
       <details><summary>Will it slow down my Mac or drain the battery?</summary><p>It's a small native app. While the island is closed it doesn't redraw, and background checks are spaced out. Battery saver reduces them further.</p></details>
       <details><summary>Which AI agents does it support?</summary><p>Claude Code and GitHub Copilot CLI work out of the box once you turn on the Island API in Settings. Anything else can report through the <code>notch</code> command or the local API.</p></details>
       <details><summary>Is it really free? What's the catch?</summary><p>No catch. There's no account, no ads and nothing is collected about you. It's a side project made because the notch deserved better.</p></details>
-      <details><summary>How do I update it?</summary><p>Notch Island checks for a new version once a day and asks before installing it. You can also choose Check for Updates from its menu bar icon, or turn on automatic installs in Settings ▸ General.</p></details>
+      <details><summary>How do I update it?</summary><p>From version 0.9.1, Notch Island checks for a new version once a day and asks before installing it. You can also choose Check for Updates from its menu bar icon, or turn on automatic installs in Settings ▸ General. On 0.9.0? Download the latest version here once.</p></details>
     </div>
   </section>
 </main>
@@ -343,10 +348,10 @@
 
   var states = {
     music: { w: 300, h: 34, html: '<div class="row"><span class="side"><span class="art"></span></span><span class="bars"><i></i><i></i><i></i><i></i></span></div>' },
-    agent: { w: 330, h: 34, html: '<div class="row"><span class="side"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="#ff8c50"/></svg>Agent</span><span class="side"><span class="spin"></span><span id="elapsed" style="font-family:var(--font-mono);color:rgba(255,255,255,.75)">1m 05s</span></span></div>' },
+    agent: { w: 330, h: 34, html: '<div class="row"><span class="side"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" fill="#ff8c50"/></svg>Claude</span><span class="side"><span class="spin"></span><span id="elapsed" style="font-family:var(--font-mono);color:rgba(255,255,255,.75)">1m 05s</span></span></div>' },
     done: { w: 420, h: 96, tall: true, finished: true, html: '<div class="banner"><span class="icon" style="background:#1c2a20"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="#30d158"/><path d="M6.2 10.3l2.5 2.5 5-5.4" fill="none" stroke="#002a0c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="text"><span class="cap">Command finished · 2m 14s</span><span class="title">npm test  ·  148 passed</span></span><span class="trail" style="color:#30d158">Done</span></div>' },
     download: { w: 420, h: 96, tall: true, html: '<div class="banner"><span class="icon" style="background:#0d2240"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3v10m0 0l-4-4m4 4l4-4M4 17h12" fill="none" stroke="#5aa9ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="text"><span class="cap">Downloading from Safari</span><span class="title">Design-Review.key</span></span>' + ringSVG(0.42, "#0a84ff") + '</div>' },
-    meeting: { w: 330, h: 34, html: '<div class="row"><span class="side"><svg width="15" height="15" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="#ff453a" stroke-width="1.7"/><path d="M2 6.5h12" stroke="#ff453a" stroke-width="1.7"/></svg>Standup · in 2 min</span><span class="join">Join</span></div>' },
+    meeting: { w: 330, h: 34, html: '<div class="row"><span class="side"><svg width="15" height="15" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="11" rx="2" fill="none" stroke="#ff453a" stroke-width="1.7"/><path d="M2 6.5h12" stroke="#ff453a" stroke-width="1.7"/></svg>Standup · in 2m</span><span class="join">Join</span></div>' },
     mic: { w: 300, h: 34, html: '<div class="row"><span class="side"><span style="width:18px;height:18px;border-radius:5px;background:linear-gradient(#3f8cff,#1d5fe0);display:grid;place-items:center"><svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="2.5" width="5.5" height="5" rx="1" fill="#fff"/><path d="M6.5 4.3L9 3v4L6.5 5.7z" fill="#fff"/></svg></span></span><span class="side"><span class="dot" style="background:#ff9f0a"></span><span class="dot" style="background:#30d158"></span></span></div>' }
   };
   var order = ["music", "agent", "done", "download", "meeting", "mic"];

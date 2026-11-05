@@ -155,6 +155,13 @@ final class IslandAPIService: ObservableObject {
             publishProgress()
             return .ok()
         case "/v1/command-finished": return commandFinished(params)
+        case "/v1/command-started":
+            if let tty = params["tty"], let shell = pid_t(params["shell"] ?? "") {
+                TerminalInputWatcher.shared.commandStarted(tty: tty, shellPID: shell,
+                                                           command: Self.clean(params["cmd"], max: 60) ?? "A command",
+                                                           hostBundleID: Self.clean(params["host"], max: 80))
+            }
+            return .ok()
         case "/v1/agent": return agentEvent(params)
         default: return .error(404, "unknown endpoint \(request.path)")
         }
@@ -257,6 +264,7 @@ final class IslandAPIService: ObservableObject {
         // Copilot has no session id: one session per agent + folder.
         let id = Self.clean(p["session"], max: 80) ?? "\(agent)|\(folder)"
         let event = (p["event"] ?? "").lowercased()
+        if let transcript = p["transcript"], !transcript.isEmpty { transcripts[id] = transcript }
         let host = Self.clean(p["host"], max: 80)
         Log.api.notice("agent \(agent, privacy: .public): \(event.isEmpty ? "(no event)" : event, privacy: .public) \(p["tool"] ?? "", privacy: .public) in \(folder, privacy: .public)")
 
@@ -367,6 +375,75 @@ final class IslandAPIService: ObservableObject {
         list.insert(session, at: 0)
         if list.count > 3 { list.removeLast(list.count - 3) }
         agentSessions = list
+        updateLivenessChecks()
+    }
+
+    // MARK: - Agents that never said "done"
+
+    /// Transcript file per session (Claude Code sends it with every hook).
+    private var transcripts: [String: String] = [:]
+    private var livenessTimer: Timer?
+    private var checkingLiveness = false
+
+    /// While a task looks active, check every 5 s whether it really still is.
+    private func updateLivenessChecks() {
+        let active = agentSessions.contains { $0.state != .done }
+        if active, livenessTimer == nil {
+            let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in self?.checkLiveness() }
+            timer.tolerance = 1
+            RunLoop.main.add(timer, forMode: .common)
+            livenessTimer = timer
+        } else if !active, let timer = livenessTimer {
+            timer.invalidate()
+            livenessTimer = nil
+        }
+    }
+
+    private func checkLiveness() {
+        guard !checkingLiveness else { return }
+        let now = Date()
+        // No transcript to check (Copilot, the Claude app) and nothing heard for 15 minutes:
+        // it's not running any more. (Claude Code's transcript shows a long build is still going.)
+        for session in agentSessions where session.state != .done && transcripts[session.id] == nil
+            && now.timeIntervalSince(session.updated) > 15 * 60 {
+            Log.api.notice("agent \(session.agent, privacy: .public): no news for 15 min — ending its activity")
+            endQuietly(session.id)
+        }
+        let candidates = agentSessions.filter { $0.state != .done }.compactMap { session in
+            transcripts[session.id].map { (session.id, $0) }
+        }
+        guard !candidates.isEmpty else { return }
+        checkingLiveness = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let results = candidates.map { ($0.0, AgentSession.turnState(transcript: $0.1)) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.checkingLiveness = false
+                for (id, state) in results {
+                    switch state {
+                    case .running:
+                        continue
+                    case .interrupted:
+                        Log.api.notice("agent session interrupted (no Stop hook) — ending its activity")
+                        self.endQuietly(id)
+                    case .finished:
+                        Log.api.notice("agent session finished without a Stop hook — finishing it")
+                        _ = self.agentEvent(["event": "stop", "session": id,
+                                             "agent": self.agentSessions.first { $0.id == id }?.agent ?? "claude",
+                                             "transcript": self.transcripts[id] ?? ""])
+                    }
+                }
+            }
+        }
+    }
+
+    /// Mark a session done without a "finished" banner (it was stopped, not completed).
+    private func endQuietly(_ id: String) {
+        guard var session = agentSessions.first(where: { $0.id == id }), session.state != .done else { return }
+        session.current = nil
+        session.currentStarted = nil
+        session.state = .done
+        store(session)
     }
 
     // MARK: - Helpers
